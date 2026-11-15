@@ -74,7 +74,8 @@ Add these secrets to your GitHub repository (**Settings** -> **Secrets and varia
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Created at [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
 | `SUPABASE_URL` | `https://<YOUR_PROJECT_REF>.supabase.co` |
-| `OPENAI_API_KEY` *(Optional)* | For semantic vector embeddings |
+| `GEMINI_API_KEY` *(Recommended)* | Free Google Gemini key for `gemini-embedding-001` (768 dimensions, 1,500 req/min free) |
+| `OPENAI_API_KEY` *(Optional)* | Fallback for `text-embedding-3-small` |
 
 Every push to `main` automatically deploys the Edge Function.
 

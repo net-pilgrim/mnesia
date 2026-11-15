@@ -16,7 +16,7 @@ create table if not exists public.memories (
     content text not null,                         -- The memory content / knowledge snippet
     tags text[] default '{}'::text[] not null,    -- Tags for filtering and grouping
     metadata jsonb default '{}'::jsonb not null,  -- Arbitrary metadata (confidence, context, sources, etc.)
-    embedding vector(768)                         -- Vector embedding (768 dimensions for Gemini text-embedding-004)
+    embedding vector(768)                         -- Vector embedding (768 dimensions for Gemini gemini-embedding-001)
 );
 
 -- 3. Automatic timestamp updater trigger
