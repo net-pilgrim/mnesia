@@ -21,6 +21,7 @@ jobs:
         uses: supabase/setup-cli@v1
         with:
           version: latest
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine Project Reference
         id: project_info
