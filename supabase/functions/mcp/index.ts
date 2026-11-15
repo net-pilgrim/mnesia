@@ -422,6 +422,21 @@ Deno.serve(async (req: Request) => {
       testEmbeddingResult = await generateEmbeddingWithStatus("test health ping");
     }
 
+    if (url.searchParams.get("listmodels") === "1" && geminiKey) {
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`);
+        const data = await res.json();
+        const embeddingModels = data.models?.filter((m: any) => m.supportedGenerationMethods?.includes("embedContent")) || [];
+        return new Response(JSON.stringify({ embeddingModels, allModels: data.models?.map((m: any) => m.name) }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      } catch (err: any) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }
+        });
+      }
+    }
+
     return new Response(
       JSON.stringify({
         status: "healthy",
