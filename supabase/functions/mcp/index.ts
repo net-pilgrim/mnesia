@@ -148,110 +148,114 @@ async function generateEmbedding(text: string, apiKey?: string): Promise<number[
 async function executeTool(name: string, args: any, supabase: SupabaseClient, openaiApiKey?: string): Promise<any> {
   args = args || {};
 
-  switch (name) {
-    case "store_memory": {
-      const { content, agent_id = "default_agent", category = "general", tags = [], session_id, metadata = {} } = args;
-      const embedding = await generateEmbedding(content, openaiApiKey);
-      const payload: any = { agent_id, session_id, category, content, tags, metadata };
-      if (embedding) payload.embedding = embedding;
+  try {
+    switch (name) {
+      case "store_memory": {
+        const { content, agent_id = "default_agent", category = "general", tags = [], session_id, metadata = {} } = args;
+        const embedding = await generateEmbedding(content, openaiApiKey);
+        const payload: any = { agent_id, session_id, category, content, tags, metadata };
+        if (embedding) payload.embedding = embedding;
 
-      const { data, error } = await supabase.table("memories").insert(payload).select().single();
-      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
-      return { content: [{ type: "text", text: JSON.stringify({ success: true, memory: data }) }] };
-    }
+        const { data, error } = await supabase.table("memories").insert(payload).select().single();
+        if (error) return { isError: true, content: [{ type: "text", text: `Database Error: ${error.message} (Code: ${error.code})` }] };
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, memory: data }) }] };
+      }
 
-    case "search_memories": {
-      const { query, agent_id, session_id, category, tags, limit = 10, match_threshold = 0.2 } = args;
-      const embedding = await generateEmbedding(query, openaiApiKey);
+      case "search_memories": {
+        const { query, agent_id, session_id, category, tags, limit = 10, match_threshold = 0.2 } = args;
+        const embedding = await generateEmbedding(query, openaiApiKey);
 
-      if (embedding) {
-        const { data, error } = await supabase.rpc("match_memories", {
-          query_embedding: embedding,
-          match_threshold,
+        if (embedding) {
+          const { data, error } = await supabase.rpc("match_memories", {
+            query_embedding: embedding,
+            match_threshold,
+            match_count: limit,
+            filter_agent_id: agent_id || null,
+            filter_session_id: session_id || null,
+            filter_category: category || null,
+            filter_tags: tags || null,
+          });
+          if (!error && data && data.length > 0) {
+            return { content: [{ type: "text", text: JSON.stringify({ count: data.length, memories: data }) }] };
+          }
+        }
+
+        // Fallback to text search RPC
+        const { data: textData, error: textError } = await supabase.rpc("search_memories_text", {
+          query_text: query,
           match_count: limit,
           filter_agent_id: agent_id || null,
           filter_session_id: session_id || null,
           filter_category: category || null,
           filter_tags: tags || null,
         });
-        if (!error && data && data.length > 0) {
-          return { content: [{ type: "text", text: JSON.stringify({ count: data.length, memories: data }) }] };
+
+        if (textError) {
+          return { isError: true, content: [{ type: "text", text: `Search error: ${textError.message}` }] };
         }
+        return { content: [{ type: "text", text: JSON.stringify({ count: textData?.length || 0, memories: textData || [] }) }] };
       }
 
-      // Fallback to text search RPC
-      const { data: textData, error: textError } = await supabase.rpc("search_memories_text", {
-        query_text: query,
-        match_count: limit,
-        filter_agent_id: agent_id || null,
-        filter_session_id: session_id || null,
-        filter_category: category || null,
-        filter_tags: tags || null,
-      });
+      case "recall_shared_memories": {
+        const { query, current_agent_id, exclude_self = false, session_id, category, limit = 10 } = args;
+        const { data, error } = await supabase.rpc("search_memories_text", {
+          query_text: query,
+          match_count: limit,
+          filter_agent_id: null,
+          filter_session_id: session_id || null,
+          filter_category: category || null,
+          filter_tags: null,
+        });
 
-      if (textError) {
-        return { isError: true, content: [{ type: "text", text: `Search error: ${textError.message}` }] };
+        let results = data || [];
+        if (exclude_self && current_agent_id) {
+          results = results.filter((m: any) => m.agent_id !== current_agent_id);
+        }
+        return { content: [{ type: "text", text: JSON.stringify({ count: results.length, memories: results }) }] };
       }
-      return { content: [{ type: "text", text: JSON.stringify({ count: textData?.length || 0, memories: textData || [] }) }] };
-    }
 
-    case "recall_shared_memories": {
-      const { query, current_agent_id, exclude_self = false, session_id, category, limit = 10 } = args;
-      const { data, error } = await supabase.rpc("search_memories_text", {
-        query_text: query,
-        match_count: limit,
-        filter_agent_id: null,
-        filter_session_id: session_id || null,
-        filter_category: category || null,
-        filter_tags: null,
-      });
-
-      let results = data || [];
-      if (exclude_self && current_agent_id) {
-        results = results.filter((m: any) => m.agent_id !== current_agent_id);
+      case "list_memories": {
+        const { agent_id, session_id, category, limit = 20 } = args;
+        let q = supabase.table("memories").select("*").order("created_at", { ascending: false }).limit(limit);
+        if (agent_id) q = q.eq("agent_id", agent_id);
+        if (session_id) q = q.eq("session_id", session_id);
+        if (category) q = q.eq("category", category);
+        const { data, error } = await q;
+        if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
+        return { content: [{ type: "text", text: JSON.stringify({ count: data?.length || 0, memories: data || [] }) }] };
       }
-      return { content: [{ type: "text", text: JSON.stringify({ count: results.length, memories: results }) }] };
-    }
 
-    case "list_memories": {
-      const { agent_id, session_id, category, limit = 20 } = args;
-      let q = supabase.table("memories").select("*").order("created_at", { ascending: false }).limit(limit);
-      if (agent_id) q = q.eq("agent_id", agent_id);
-      if (session_id) q = q.eq("session_id", session_id);
-      if (category) q = q.eq("category", category);
-      const { data, error } = await q;
-      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
-      return { content: [{ type: "text", text: JSON.stringify({ count: data?.length || 0, memories: data || [] }) }] };
-    }
+      case "list_skills": {
+        const { data, error } = await supabase.table("skills").select("name, description, tags, author_agent");
+        if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
+        return { content: [{ type: "text", text: JSON.stringify({ skills: data || [] }) }] };
+      }
 
-    case "list_skills": {
-      const { data, error } = await supabase.table("skills").select("name, description, tags, author_agent");
-      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
-      return { content: [{ type: "text", text: JSON.stringify({ skills: data || [] }) }] };
-    }
+      case "get_skill": {
+        const { name: skillName } = args;
+        const { data, error } = await supabase.table("skills").select("*").eq("name", skillName).single();
+        if (error) return { isError: true, content: [{ type: "text", text: `Skill '${skillName}' not found.` }] };
+        return { content: [{ type: "text", text: JSON.stringify(data) }] };
+      }
 
-    case "get_skill": {
-      const { name: skillName } = args;
-      const { data, error } = await supabase.table("skills").select("*").eq("name", skillName).single();
-      if (error) return { isError: true, content: [{ type: "text", text: `Skill '${skillName}' not found.` }] };
-      return { content: [{ type: "text", text: JSON.stringify(data) }] };
-    }
+      case "publish_skill": {
+        const { name: sName, description, instructions, tags = [], author_agent = "agent" } = args;
+        const { data, error } = await supabase.table("skills").upsert({
+          name: sName,
+          description,
+          instructions,
+          tags,
+          author_agent,
+        }).select().single();
+        if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
+        return { content: [{ type: "text", text: JSON.stringify({ success: true, skill: data }) }] };
+      }
 
-    case "publish_skill": {
-      const { name: sName, description, instructions, tags = [], author_agent = "agent" } = args;
-      const { data, error } = await supabase.table("skills").upsert({
-        name: sName,
-        description,
-        instructions,
-        tags,
-        author_agent,
-      }).select().single();
-      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
-      return { content: [{ type: "text", text: JSON.stringify({ success: true, skill: data }) }] };
+      default:
+        return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
     }
-
-    default:
-      return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
+  } catch (err: any) {
+    return { isError: true, content: [{ type: "text", text: `Tool execution failed: ${err.message || String(err)}` }] };
   }
 }
 
@@ -433,11 +437,22 @@ Deno.serve(async (req: Request) => {
 
   // 3. Direct JSON-RPC over HTTP POST (Stateless / Streamable HTTP)
   if (req.method === "POST") {
-    const body = await req.json();
-    const response = await handleJsonRpc(body, supabase, openaiApiKey);
-    return new Response(JSON.stringify(response || {}), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    try {
+      const body = await req.json();
+      const response = await handleJsonRpc(body, supabase, openaiApiKey);
+      return new Response(JSON.stringify(response || {}), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    } catch (err: any) {
+      console.error("Direct JSON-RPC error:", err);
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: err?.message || String(err), stack: err?.stack },
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
   }
 
   return new Response("Not Found", { status: 404, headers: corsHeaders });
