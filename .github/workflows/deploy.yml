@@ -61,15 +61,15 @@ jobs:
         run: |
           if [ -n "$GEMINI_API_KEY" ]; then
             echo "Configuring GEMINI_API_KEY in Supabase..."
-            supabase secrets set GEMINI_API_KEY="$GEMINI_API_KEY" --project-ref "$PROJECT_REF"
+            supabase secrets set GEMINI_API_KEY="$GEMINI_API_KEY" --project-ref "$PROJECT_REF" --yes
           fi
           if [ -n "$GOOGLE_API_KEY" ]; then
             echo "Configuring GOOGLE_API_KEY in Supabase..."
-            supabase secrets set GOOGLE_API_KEY="$GOOGLE_API_KEY" --project-ref "$PROJECT_REF"
+            supabase secrets set GOOGLE_API_KEY="$GOOGLE_API_KEY" --project-ref "$PROJECT_REF" --yes
           fi
           if [ -n "$OPENAI_API_KEY" ]; then
             echo "Configuring OPENAI_API_KEY in Supabase..."
-            supabase secrets set OPENAI_API_KEY="$OPENAI_API_KEY" --project-ref "$PROJECT_REF"
+            supabase secrets set OPENAI_API_KEY="$OPENAI_API_KEY" --project-ref "$PROJECT_REF" --yes
           fi
 
       - name: Display Function URL
