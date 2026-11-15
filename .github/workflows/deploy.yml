@@ -48,7 +48,7 @@ jobs:
             echo "::error::SUPABASE_ACCESS_TOKEN is missing! Please generate a personal access token at https://supabase.com/dashboard/account/tokens and add it to GitHub Secrets."
             exit 1
           fi
-          supabase functions deploy mcp --project-ref "$PROJECT_REF" --no-verify-jwt
+          supabase functions deploy mcp --project-ref "$PROJECT_REF" --no-verify-jwt --yes
 
       - name: Configure Optional Secrets
         env:
