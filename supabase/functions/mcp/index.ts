@@ -117,13 +117,15 @@ const MCP_TOOLS = [
 
 /**
  * Generate vector embeddings with Gemini text-embedding-004 (primary) or OpenAI (fallback)
+ * with status tracking for diagnostics
  */
-async function generateEmbedding(text: string): Promise<number[] | null> {
+async function generateEmbeddingWithStatus(text: string): Promise<{ embedding: number[] | null; status: string }> {
   const cleanText = text.replace(/\n/g, " ").trim();
-  if (!cleanText) return null;
+  if (!cleanText) return { embedding: null, status: "empty_text" };
 
   // 1. Primary: Google Gemini text-embedding-004 (768 dimensions, 1,500 req/min free)
   const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
+  let lastGeminiError = "";
   if (geminiKey) {
     try {
       const res = await fetch(
@@ -140,13 +142,16 @@ async function generateEmbedding(text: string): Promise<number[] | null> {
       if (res.ok) {
         const data: any = await res.json();
         if (data.embedding?.values) {
-          return data.embedding.values;
+          return { embedding: data.embedding.values, status: `gemini_ok (${data.embedding.values.length} dims)` };
         }
+        lastGeminiError = `empty_values: ${JSON.stringify(data)}`;
       } else {
         const errText = await res.text();
+        lastGeminiError = `http_${res.status}: ${errText}`;
         console.error("Gemini embedding error response:", errText);
       }
-    } catch (err) {
+    } catch (err: any) {
+      lastGeminiError = `exception: ${err.message}`;
       console.error("Gemini embedding request failed:", err);
     }
   }
@@ -169,14 +174,27 @@ async function generateEmbedding(text: string): Promise<number[] | null> {
       });
       if (res.ok) {
         const data: any = await res.json();
-        return data.data?.[0]?.embedding || null;
+        const vec = data.data?.[0]?.embedding || null;
+        return { embedding: vec, status: `openai_ok (${vec?.length} dims)` };
+      } else {
+        const errText = await res.text();
+        return { embedding: null, status: `gemini_failed (${lastGeminiError}), openai_error: ${errText}` };
       }
-    } catch (err) {
-      console.error("OpenAI embedding request failed:", err);
+    } catch (err: any) {
+      return { embedding: null, status: `gemini_failed (${lastGeminiError}), openai_exception: ${err.message}` };
     }
   }
 
-  return null;
+  if (geminiKey) {
+    return { embedding: null, status: `gemini_failed: ${lastGeminiError}` };
+  }
+
+  return { embedding: null, status: "no_api_key_configured" };
+}
+
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  const result = await generateEmbeddingWithStatus(text);
+  return result.embedding;
 }
 
 /**
@@ -189,13 +207,26 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
     switch (name) {
       case "store_memory": {
         const { content, agent_id = "default_agent", category = "general", tags = [], session_id, metadata = {} } = args;
-        const embedding = await generateEmbedding(content);
+        const embedResult = await generateEmbeddingWithStatus(content);
         const payload: any = { agent_id, session_id, category, content, tags, metadata };
-        if (embedding) payload.embedding = embedding;
+        if (embedResult.embedding) payload.embedding = embedResult.embedding;
 
         const { data, error } = await supabase.from("memories").insert(payload).select().single();
-        if (error) return { isError: true, content: [{ type: "text", text: `Database Error: ${error.message} (Code: ${error.code})` }] };
-        return { content: [{ type: "text", text: JSON.stringify({ success: true, memory: data }) }] };
+        if (error) {
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: `Database Error: ${error.message} (Code: ${error.code}). Embedding Status: ${embedResult.status}`,
+            }],
+          };
+        }
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ success: true, embedding_status: embedResult.status, memory: data }),
+          }],
+        };
       }
 
       case "search_memories": {
@@ -383,8 +414,25 @@ Deno.serve(async (req: Request) => {
 
   // Healthcheck endpoint
   if (req.method === "GET" && (pathname.endsWith("/health") || pathname === "/functions/v1/mcp")) {
+    const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
+    const openaiKey = Deno.env.get("OPENAI_API_KEY");
+    let testEmbeddingResult: any = undefined;
+
+    if (url.searchParams.get("test") === "embedding") {
+      testEmbeddingResult = await generateEmbeddingWithStatus("test health ping");
+    }
+
     return new Response(
-      JSON.stringify({ status: "healthy", server: "MnesiaMemorySystem", runtime: "supabase-edge" }),
+      JSON.stringify({
+        status: "healthy",
+        server: "MnesiaMemorySystem",
+        runtime: "supabase-edge",
+        config: {
+          geminiKeyConfigured: !!geminiKey,
+          openaiKeyConfigured: !!openaiKey,
+        },
+        testEmbedding: testEmbeddingResult,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
