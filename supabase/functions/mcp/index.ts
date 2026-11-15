@@ -355,9 +355,8 @@ Deno.serve(async (req: Request) => {
     const encoder = new TextEncoder();
     let streamController: ReadableStreamDefaultController<Uint8Array>;
 
-    const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || url.host;
-    const proto = req.headers.get("x-forwarded-proto") || "https";
-    const endpointUri = `${proto}://${host}/functions/v1/mcp/message?sessionId=${sessionId}`;
+    const base = Deno.env.get("SUPABASE_URL") || `${url.protocol}//${url.host}`;
+    const endpointUri = `${base}/functions/v1/mcp/message?sessionId=${sessionId}`;
 
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {
