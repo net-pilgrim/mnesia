@@ -1,23 +1,119 @@
 // Supabase Edge Function: Multi-Agent MCP Memory Server (Mnesia)
 // Runtime: Deno / Edge Runtime
-// Zero Containers, Zero Tunnels, $0/mo on Supabase Free Tier
+// Protocol: Model Context Protocol (MCP) over Server-Sent Events (SSE) & Streamable HTTP
 
-import { McpServer } from "npm:@modelcontextprotocol/sdk@^1.6.0/server/mcp.js";
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@^2.49.1";
-import { z } from "npm:zod@^3.24.2";
+
+interface Session {
+  send: (data: any) => void;
+  close: () => void;
+}
 
 // Active SSE sessions in memory
-const sessions = new Map<string, {
-  server: McpServer;
-  writer: WritableStreamDefaultWriter<Uint8Array>;
-  encoder: TextEncoder;
-}>();
+const sessions = new Map<string, Session>();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+// Tool Definitions according to MCP specifications
+const MCP_TOOLS = [
+  {
+    name: "store_memory",
+    description: "Store a new memory item in Supabase for cross-agent sharing",
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "The factual knowledge, decision, or insight to remember" },
+        agent_id: { type: "string", description: "Authoring agent identifier", default: "default_agent" },
+        category: { type: "string", description: "Category: 'fact', 'decision', 'preference', etc.", default: "general" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags for grouping/filtering" },
+        session_id: { type: "string", description: "Workflow or conversation scope" },
+        metadata: { type: "object", description: "Arbitrary JSON metadata" },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "search_memories",
+    description: "Search memories using pgvector cosine similarity or full-text search fallback",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Semantic query or keywords" },
+        agent_id: { type: "string", description: "Optional filter by authoring agent" },
+        session_id: { type: "string", description: "Optional session filter" },
+        category: { type: "string", description: "Optional category filter" },
+        tags: { type: "array", items: { type: "string" }, description: "Optional tags filter" },
+        limit: { type: "number", description: "Max results", default: 10 },
+        match_threshold: { type: "number", description: "Min cosine similarity threshold", default: 0.2 },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "recall_shared_memories",
+    description: "Recall knowledge discovered by peer agents to coordinate tasks without duplicate work",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Topic or question to recall" },
+        current_agent_id: { type: "string", description: "ID of the current agent" },
+        exclude_self: { type: "boolean", description: "Whether to exclude memories authored by self", default: false },
+        session_id: { type: "string", description: "Optional session filter" },
+        category: { type: "string", description: "Optional category filter" },
+        limit: { type: "number", description: "Max results", default: 10 },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "list_memories",
+    description: "List recent memories stored in Supabase with optional filters",
+    inputSchema: {
+      type: "object",
+      properties: {
+        agent_id: { type: "string", description: "Optional author filter" },
+        session_id: { type: "string", description: "Optional session filter" },
+        category: { type: "string", description: "Optional category filter" },
+        limit: { type: "number", description: "Max results", default: 20 },
+      },
+    },
+  },
+  {
+    name: "list_skills",
+    description: "List operational skills and runbooks stored in Supabase",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_skill",
+    description: "Retrieve the procedural runbook for a specific skill",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Unique name of the skill" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "publish_skill",
+    description: "Publish a reusable skill or procedure to Supabase",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Skill identifier (slug)" },
+        description: { type: "string", description: "Summary of when to use this skill" },
+        instructions: { type: "string", description: "Step-by-step markdown instructions" },
+        tags: { type: "array", items: { type: "string" }, description: "Tags for categorization" },
+        author_agent: { type: "string", description: "Publishing agent ID", default: "agent" },
+      },
+      required: ["name", "description", "instructions"],
+    },
+  },
+];
 
 /**
  * Generate vector embeddings with OpenAI or fallback
@@ -47,58 +143,25 @@ async function generateEmbedding(text: string, apiKey?: string): Promise<number[
 }
 
 /**
- * Configure McpServer with all multi-agent memory and skill tools
+ * Execute tool calls against Supabase
  */
-function createMcpServer(supabase: SupabaseClient, openaiApiKey?: string) {
-  const server = new McpServer({
-    name: "MnesiaMemorySystem-SupabaseEdge",
-    version: "1.0.0",
-  });
+async function executeTool(name: string, args: any, supabase: SupabaseClient, openaiApiKey?: string): Promise<any> {
+  args = args || {};
 
-  // 1. Tool: store_memory
-  server.tool(
-    "store_memory",
-    "Store a new memory item in Supabase for cross-agent sharing",
-    {
-      content: z.string().describe("The factual knowledge, decision, or insight to remember"),
-      agent_id: z.string().default("default_agent").describe("Authoring agent identifier"),
-      category: z.string().default("general").describe("Memory category: 'fact', 'decision', 'preference', etc."),
-      tags: z.array(z.string()).optional().describe("Tags for filtering"),
-      session_id: z.string().optional().describe("Workflow/session scope"),
-      metadata: z.record(z.any()).optional().describe("Arbitrary JSON metadata"),
-    },
-    async ({ content, agent_id, category, tags = [], session_id, metadata = {} }) => {
+  switch (name) {
+    case "store_memory": {
+      const { content, agent_id = "default_agent", category = "general", tags = [], session_id, metadata = {} } = args;
       const embedding = await generateEmbedding(content, openaiApiKey);
-      const payload: any = {
-        agent_id,
-        session_id,
-        category,
-        content,
-        tags,
-        metadata,
-      };
+      const payload: any = { agent_id, session_id, category, content, tags, metadata };
       if (embedding) payload.embedding = embedding;
 
       const { data, error } = await supabase.table("memories").insert(payload).select().single();
-      if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
       return { content: [{ type: "text", text: JSON.stringify({ success: true, memory: data }) }] };
     }
-  );
 
-  // 2. Tool: search_memories
-  server.tool(
-    "search_memories",
-    "Search memories using pgvector cosine similarity or full-text search fallback",
-    {
-      query: z.string().describe("Semantic query or keywords"),
-      agent_id: z.string().optional(),
-      session_id: z.string().optional(),
-      category: z.string().optional(),
-      tags: z.array(z.string()).optional(),
-      limit: z.number().default(10),
-      match_threshold: z.number().default(0.2),
-    },
-    async ({ query, agent_id, session_id, category, tags, limit = 10, match_threshold = 0.2 }) => {
+    case "search_memories": {
+      const { query, agent_id, session_id, category, tags, limit = 10, match_threshold = 0.2 } = args;
       const embedding = await generateEmbedding(query, openaiApiKey);
 
       if (embedding) {
@@ -127,25 +190,13 @@ function createMcpServer(supabase: SupabaseClient, openaiApiKey?: string) {
       });
 
       if (textError) {
-        return { content: [{ type: "text", text: `Search error: ${textError.message}` }] };
+        return { isError: true, content: [{ type: "text", text: `Search error: ${textError.message}` }] };
       }
       return { content: [{ type: "text", text: JSON.stringify({ count: textData?.length || 0, memories: textData || [] }) }] };
     }
-  );
 
-  // 3. Tool: recall_shared_memories
-  server.tool(
-    "recall_shared_memories",
-    "Recall knowledge discovered by peer agents to coordinate tasks without duplicate work",
-    {
-      query: z.string(),
-      current_agent_id: z.string().optional(),
-      exclude_self: z.boolean().default(false),
-      session_id: z.string().optional(),
-      category: z.string().optional(),
-      limit: z.number().default(10),
-    },
-    async ({ query, current_agent_id, exclude_self, session_id, category, limit }) => {
+    case "recall_shared_memories": {
+      const { query, current_agent_id, exclude_self = false, session_id, category, limit = 10 } = args;
       const { data, error } = await supabase.rpc("search_memories_text", {
         query_text: query,
         match_count: limit,
@@ -161,83 +212,123 @@ function createMcpServer(supabase: SupabaseClient, openaiApiKey?: string) {
       }
       return { content: [{ type: "text", text: JSON.stringify({ count: results.length, memories: results }) }] };
     }
-  );
 
-  // 4. Tool: list_memories
-  server.tool(
-    "list_memories",
-    "List recent memories stored in Supabase",
-    {
-      agent_id: z.string().optional(),
-      session_id: z.string().optional(),
-      category: z.string().optional(),
-      limit: z.number().default(20),
-    },
-    async ({ agent_id, session_id, category, limit }) => {
+    case "list_memories": {
+      const { agent_id, session_id, category, limit = 20 } = args;
       let q = supabase.table("memories").select("*").order("created_at", { ascending: false }).limit(limit);
       if (agent_id) q = q.eq("agent_id", agent_id);
       if (session_id) q = q.eq("session_id", session_id);
       if (category) q = q.eq("category", category);
       const { data, error } = await q;
-      if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
       return { content: [{ type: "text", text: JSON.stringify({ count: data?.length || 0, memories: data || [] }) }] };
     }
-  );
 
-  // 5. Tool: list_skills
-  server.tool(
-    "list_skills",
-    "List operational skills and runbooks stored in Supabase",
-    {},
-    async () => {
+    case "list_skills": {
       const { data, error } = await supabase.table("skills").select("name, description, tags, author_agent");
-      if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
       return { content: [{ type: "text", text: JSON.stringify({ skills: data || [] }) }] };
     }
-  );
 
-  // 6. Tool: get_skill
-  server.tool(
-    "get_skill",
-    "Retrieve the procedural runbook for a specific skill",
-    { name: z.string() },
-    async ({ name }) => {
-      const { data, error } = await supabase.table("skills").select("*").eq("name", name).single();
-      if (error) return { content: [{ type: "text", text: `Skill '${name}' not found.` }] };
+    case "get_skill": {
+      const { name: skillName } = args;
+      const { data, error } = await supabase.table("skills").select("*").eq("name", skillName).single();
+      if (error) return { isError: true, content: [{ type: "text", text: `Skill '${skillName}' not found.` }] };
       return { content: [{ type: "text", text: JSON.stringify(data) }] };
     }
-  );
 
-  // 7. Tool: publish_skill
-  server.tool(
-    "publish_skill",
-    "Publish a reusable skill or procedure to Supabase",
-    {
-      name: z.string(),
-      description: z.string(),
-      instructions: z.string(),
-      tags: z.array(z.string()).optional(),
-      author_agent: z.string().default("agent"),
-    },
-    async ({ name, description, instructions, tags = [], author_agent }) => {
+    case "publish_skill": {
+      const { name: sName, description, instructions, tags = [], author_agent = "agent" } = args;
       const { data, error } = await supabase.table("skills").upsert({
-        name,
+        name: sName,
         description,
         instructions,
         tags,
         author_agent,
       }).select().single();
-      if (error) return { content: [{ type: "text", text: `Error: ${error.message}` }] };
+      if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
       return { content: [{ type: "text", text: JSON.stringify({ success: true, skill: data }) }] };
     }
-  );
 
-  return server;
+    default:
+      return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
+  }
+}
+
+/**
+ * Handle incoming JSON-RPC 2.0 messages from MCP client
+ */
+async function handleJsonRpc(
+  msg: any,
+  supabase: SupabaseClient,
+  openaiApiKey?: string
+): Promise<any | null> {
+  const { jsonrpc, id, method, params } = msg;
+
+  if (method === "initialize") {
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: "2024-11-05",
+        capabilities: {
+          tools: { listChanged: false },
+        },
+        serverInfo: {
+          name: "MnesiaMemorySystem",
+          version: "1.0.0",
+        },
+      },
+    };
+  }
+
+  if (method === "notifications/initialized") {
+    // Notification has no return id
+    return null;
+  }
+
+  if (method === "ping") {
+    return { jsonrpc: "2.0", id, result: {} };
+  }
+
+  if (method === "tools/list") {
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: {
+        tools: MCP_TOOLS,
+      },
+    };
+  }
+
+  if (method === "tools/call") {
+    const toolName = params?.name;
+    const toolArgs = params?.arguments;
+    const toolResult = await executeTool(toolName, toolArgs, supabase, openaiApiKey);
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: toolResult,
+    };
+  }
+
+  // Unsupported method fallback
+  if (id !== undefined) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32601,
+        message: `Method '${method}' not found.`,
+      },
+    };
+  }
+
+  return null;
 }
 
 // Main Edge Function HTTP Handler
 Deno.serve(async (req: Request) => {
-  // Handle CORS Preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
@@ -245,15 +336,13 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
   const pathname = url.pathname;
 
-  // Supabase automatically injects these into Edge Functions
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
   const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   // Healthcheck endpoint
-  if (req.method === "GET" && (pathname.endsWith("/health") || pathname === "/")) {
+  if (req.method === "GET" && (pathname.endsWith("/health") || pathname === "/functions/v1/mcp")) {
     return new Response(
       JSON.stringify({ status: "healthy", server: "MnesiaMemorySystem", runtime: "supabase-edge" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -263,21 +352,38 @@ Deno.serve(async (req: Request) => {
   // 1. GET /sse -> Establish Server-Sent Events stream
   if (req.method === "GET" && (pathname.endsWith("/sse") || url.searchParams.get("transport") === "sse")) {
     const sessionId = crypto.randomUUID();
-    const { readable, writable } = new TransformStream();
-    const writer = writable.getWriter();
     const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array>;
 
-    const server = createMcpServer(supabase, openaiApiKey);
-    sessions.set(sessionId, { server, writer, encoder });
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+        const endpointUri = `${url.origin}${url.pathname.replace(/\/sse$/, "")}/message?sessionId=${sessionId}`;
+        controller.enqueue(encoder.encode(`event: endpoint\ndata: ${endpointUri}\n\n`));
+      },
+      cancel() {
+        sessions.delete(sessionId);
+      },
+    });
 
-    // Send initial SSE endpoint URI
-    const endpointUri = `${url.origin}${url.pathname.replace(/\/sse$/, "")}/message?sessionId=${sessionId}`;
-    await writer.write(encoder.encode(`event: endpoint\ndata: ${endpointUri}\n\n`));
+    sessions.set(sessionId, {
+      send: (data: any) => {
+        try {
+          const payload = `event: message\ndata: ${JSON.stringify(data)}\n\n`;
+          streamController.enqueue(encoder.encode(payload));
+        } catch (e) {
+          console.error("SSE send error:", e);
+        }
+      },
+      close: () => {
+        try {
+          streamController.close();
+        } catch (_) {}
+      },
+    });
 
-    // Handle client disconnect
     req.signal?.addEventListener("abort", () => {
       sessions.delete(sessionId);
-      writer.close().catch(() => {});
     });
 
     return new Response(readable, {
@@ -290,25 +396,44 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // 2. POST /message?sessionId=... -> Client message handler
+  // 2. POST /message?sessionId=... -> Client message handler (MCP SSE transport)
   if (req.method === "POST" && (pathname.endsWith("/message") || url.searchParams.has("sessionId"))) {
     const sessionId = url.searchParams.get("sessionId");
     if (!sessionId || !sessions.has(sessionId)) {
-      return new Response(JSON.stringify({ error: "Session not found" }), {
+      return new Response(JSON.stringify({ error: "Session not found or expired" }), {
         status: 404,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify({ received: true }), {
+    const session = sessions.get(sessionId)!;
+    const body = await req.json();
+
+    // Process JSON-RPC message asynchronously and stream result back via SSE
+    handleJsonRpc(body, supabase, openaiApiKey).then((response) => {
+      if (response) {
+        session.send(response);
+      }
+    }).catch((err) => {
+      session.send({
+        jsonrpc: "2.0",
+        id: body?.id,
+        error: { code: -32603, message: err.message },
+      });
+    });
+
+    // Accept message immediately
+    return new Response("Accepted", {
       status: 202,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "text/plain" },
     });
   }
 
-  // 3. Direct JSON-RPC over HTTP POST
+  // 3. Direct JSON-RPC over HTTP POST (Stateless / Streamable HTTP)
   if (req.method === "POST") {
-    return new Response(JSON.stringify({ jsonrpc: "2.0", result: { status: "ready" } }), {
+    const body = await req.json();
+    const response = await handleJsonRpc(body, supabase, openaiApiKey);
+    return new Response(JSON.stringify(response || {}), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
