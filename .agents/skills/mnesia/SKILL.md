@@ -1,11 +1,11 @@
 ---
-name: shared-memory
+name: mnesia
 description: >-
   Guide and best practices for storing, querying, and sharing persistent memories and skills
-  across multi-agent fleets using the Supabase Edge MCP Memory System.
+  across multi-agent fleets using the Mnesia Supabase Edge MCP Memory System.
 ---
 
-# Shared Memory & Multi-Agent Collaboration Skill
+# Mnesia: Multi-Agent Shared Memory & Skills System
 
 This skill instructs agents on how to leverage the Supabase Edge MCP Memory server (`MnesiaMemorySystem`) to coordinate with other agents, persist critical discoveries, avoid duplicate work, and share skills across sessions.
 

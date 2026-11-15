@@ -54,7 +54,7 @@ A persistent, shared memory system for AI agents built natively on **Supabase Ed
 │       └── deploy.yml            # Automated CI/CD deployment workflow
 ├── .agents/
 │   └── skills/
-│       └── shared-memory/
+│       └── mnesia/
 │           └── SKILL.md          # Agent skill for memory & collaboration
 ├── .env.example                  # Environment configuration template
 └── README.md
