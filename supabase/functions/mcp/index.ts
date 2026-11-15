@@ -353,6 +353,24 @@ Deno.serve(async (req: Request) => {
     );
   }
 
+  // Authentication Check (Active if MCP_API_KEY secret is configured)
+  const expectedToken = Deno.env.get("MCP_API_KEY");
+  if (expectedToken) {
+    const authHeader = req.headers.get("authorization");
+    const apiKeyHeader = req.headers.get("x-api-key");
+    const tokenParam = url.searchParams.get("token") || url.searchParams.get("apiKey");
+
+    const isHeaderValid = authHeader === `Bearer ${expectedToken}` || apiKeyHeader === expectedToken;
+    const isParamValid = tokenParam === expectedToken;
+
+    if (!isHeaderValid && !isParamValid) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: Invalid or missing MCP_API_KEY token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  }
+
   // 1. GET /sse -> Establish Server-Sent Events stream
   if (req.method === "GET" && (pathname.endsWith("/sse") || url.searchParams.get("transport") === "sse")) {
     const sessionId = crypto.randomUUID();
@@ -360,7 +378,9 @@ Deno.serve(async (req: Request) => {
     let streamController: ReadableStreamDefaultController<Uint8Array>;
 
     const base = Deno.env.get("SUPABASE_URL") || `${url.protocol}//${url.host}`;
-    const endpointUri = `${base}/functions/v1/mcp/message?sessionId=${sessionId}`;
+    const tokenParam = url.searchParams.get("token") || url.searchParams.get("apiKey");
+    const authQuery = tokenParam ? `&token=${encodeURIComponent(tokenParam)}` : "";
+    const endpointUri = `${base}/functions/v1/mcp/message?sessionId=${sessionId}${authQuery}`;
 
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {

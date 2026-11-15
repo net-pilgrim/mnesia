@@ -74,6 +74,7 @@ Add these two secrets to your GitHub repository (**Settings** -> **Secrets and v
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Created at [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
 | `SUPABASE_URL` | `https://<YOUR_PROJECT_REF>.supabase.co` |
+| `MCP_API_KEY` *(Optional)* | Custom secret token to authenticate agents |
 | `OPENAI_API_KEY` *(Optional)* | For semantic vector embeddings |
 
 Every push to `main` automatically deploys the Edge Function.
@@ -83,6 +84,37 @@ Every push to `main` automatically deploys the Edge Function.
 npx supabase login
 npx supabase link --project-ref <YOUR_PROJECT_REF>
 npx supabase functions deploy mcp --no-verify-jwt
+```
+
+---
+
+## 🔒 Authentication
+
+When `MCP_API_KEY` is configured in Supabase secrets, your MCP server requires agents to authenticate.
+
+### Method A: HTTP Header (Standard)
+```json
+{
+  "mcpServers": {
+    "supabase-memory": {
+      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_MCP_API_KEY"
+      }
+    }
+  }
+}
+```
+
+### Method B: URL Token (For clients that don't support custom headers)
+```json
+{
+  "mcpServers": {
+    "supabase-memory": {
+      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse?token=YOUR_MCP_API_KEY"
+    }
+  }
+}
 ```
 
 ---
