@@ -13,15 +13,21 @@ Run your MCP Memory System natively inside **Supabase Edge Functions**.
 
 ## 🏗️ Architecture
 
-```
-[Agent: AGY / Claude / Cursor]
-              │
-              │  Model Context Protocol (SSE / JSON-RPC over HTTPS)
-              ▼
-[Supabase Edge Function: /functions/v1/mcp]
-   ├─ Auth: Verifies Supabase API Key (service_role or anon)
-   ├─ Embeddings: Calls Google Gemini (gemini-embedding-001 @ 768 dims)
-   └─ Postgres: Executes pgvector HNSW match_memories RPC & FTS
+```mermaid
+flowchart TD
+    Agent["Autonomous Agent (AGY / Claude / Cursor)"]
+    Gateway["Supabase Edge Function (/functions/v1/mcp)"]
+    Gemini["Google Gemini (gemini-embedding-001)"]
+    Postgres[("Supabase PostgreSQL")]
+    Memories[("public.memories")]
+    Skills[("public.skills")]
+
+    Agent -->|"MCP over SSE (HTTPS)"| Gateway
+    Gateway -->|"1. Generate 768-dim Vector"| Gemini
+    Gemini -->|"2. Return Vector"| Gateway
+    Gateway -->|"3. Execute match_memories RPC"| Postgres
+    Postgres --- Memories
+    Postgres --- Skills
 ```
 
 ---

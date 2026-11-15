@@ -5,7 +5,7 @@
 [![Embeddings: Gemini](https://img.shields.io/badge/Embeddings-Google%20Gemini%20(Free)-4285F4?logo=google)](https://aistudio.google.com)
 [![Protocol: MCP](https://img.shields.io/badge/Protocol-Model%20Context%20Protocol-orange)](https://modelcontextprotocol.io)
 
-**Mnesia** is a persistent, shared memory and skill store for fleets of autonomous AI agents (Antigravity/AGY, Claude Desktop, Cursor, LangGraph, AutoGen, etc.). Built natively on **Supabase Edge Functions** (Deno) and **PostgreSQL with `pgvector`**, it enables agents across different sessions and devices to store discoveries, recall peer knowledge, and execute shared runbooks.
+**Mnesia** is a persistent, shared memory and skill store for fleets of autonomous AI agents (Antigravity/AGY, Claude Desktop, Cursor, LangGraph, AutoGen, etc.). Built natively on **Supabase Edge Functions** (Deno) and **PostgreSQL with `pgvector`**, it enables agents across different sessions, machines, and workspaces to store discoveries, recall peer knowledge, and execute shared runbooks.
 
 - ❌ **No Docker containers or local daemon processes**
 - ❌ **No VPS servers to maintain or pay for**
@@ -20,46 +20,190 @@
 
 ## 🏗️ Architecture & How It Works
 
-```
-                                ┌─────────────────────────────────────────┐
-                                │            AI AGENT FLEET               │
-                                │   • Google Antigravity (AGY CLI / IDE)  │
-                                │   • Claude Desktop / Cursor             │
-                                │   • Autonomous Python / LangGraph fleets│
-                                └────────────────────┬────────────────────┘
-                                                     │ Model Context Protocol
-                                                     │ (SSE / JSON-RPC over HTTPS)
-                                                     ▼
-                                ┌─────────────────────────────────────────┐
-                                │         SUPABASE EDGE FUNCTION          │
-                                │          (/functions/v1/mcp)            │
-                                │                                         │
-                                │ • Deno Serverless Runtime (EU/Global)   │
-                                │ • Supabase Key Auth Guard (Option 1)    │
-                                │ • MCP Protocol Dispatcher (7 Tools)     │
-                                └─────────┬─────────────────────┬─────────┘
-                                          │                     │
-                1. Compute 768-dim Vector │                     │ 2. Query / Store Records
-                                          ▼                     ▼
-               ┌───────────────────────────────┐   ┌───────────────────────────────┐
-               │     GOOGLE GEMINI AI STUDIO   │   │       SUPABASE POSTGRESQL     │
-               │  • Model: gemini-embedding-001│   │                               │
-               │  • Output Dimension: 768      │   │  • Table: public.memories     │
-               │  • Free Rate: 1,500 req/min   │   │  • Table: public.skills       │
-               │  • (Fallback: OpenAI / FTS)   │   │  • Index: HNSW Vector Cosine  │
-               └───────────────────────────────┘   │  • Index: GIN Full-Text Search│
-                                                   │  • RPC: match_memories        │
-                                                   └───────────────────────────────┘
+```mermaid
+flowchart TD
+    subgraph Fleet["AI Agent Fleet"]
+        A["Google Antigravity (AGY CLI / IDE)"]
+        B["Claude Desktop / Cursor"]
+        C["Autonomous Agents (LangGraph / Swarm)"]
+    end
+
+    subgraph Edge["Supabase Edge Function (/functions/v1/mcp)"]
+        D["MCP SSE & JSON-RPC Protocol Dispatcher"]
+        E["Supabase API Key Auth Guard"]
+    end
+
+    subgraph Gemini["Google AI Studio"]
+        F["gemini-embedding-001 (768 dims, 1,500 req/min Free)"]
+    end
+
+    subgraph DB["Supabase PostgreSQL & pgvector"]
+        G[("public.memories")]
+        H[("public.skills")]
+        I["HNSW Cosine Vector Index"]
+        J["GIN Full-Text Search Index"]
+        K["match_memories Vector Cosine RPC"]
+    end
+
+    Fleet -->|"MCP over SSE (HTTPS)"| E
+    E --> D
+    D -->|"1. Generate 768-dim Embedding"| Gemini
+    Gemini -->|"2. Return Vector"| D
+    D -->|"3. Match Similarity / Insert"| DB
+    DB --- G
+    DB --- H
+    G --- I
+    G --- J
+    G --- K
 ```
 
 ### Architectural Flow:
-1. **Agent Request**: Your agent initiates an MCP call (e.g. `search_memories`, `store_memory`, or `publish_skill`) over a secure HTTPS Server-Sent Events (SSE) connection.
+1. **Agent Connection**: Your agent connects to Mnesia over a secure HTTPS Server-Sent Events (SSE) stream using the standard **Model Context Protocol (MCP)**.
 2. **Authentication Guard**: The Edge Function validates incoming requests against your Supabase `service_role` (secret) or `anon` (publishable) key via the HTTP `Authorization` header, `apikey` header, or URL query parameter.
-3. **Embedding Generation**: When saving or searching memories, the Edge Function queries Google Gemini's `gemini-embedding-001` endpoint with `outputDimensionality: 768` (Matryoshka representation) to generate vector embeddings instantly.
+3. **Embedding Generation**: When saving or searching memories, the Edge Function calls Google Gemini's `gemini-embedding-001` endpoint with `outputDimensionality: 768` (Matryoshka representation) to generate vector embeddings instantly.
 4. **PostgreSQL Dual Storage**:
    - Vector embeddings are indexed in Postgres using an **HNSW cosine index** (`vector_cosine_ops`) for semantic search.
-   - Content is also indexed with a **GIN English tsvector index** (`to_tsvector('english', content)`) for exact keyword and symbol search.
-5. **Team Skills Catalog**: Solved procedures and runbooks are stored in the `public.skills` table, allowing agents to dynamically look up and execute complex workflows created by other agents.
+   - Content is also indexed with a **GIN English tsvector index** (`to_tsvector('english', content)`) for exact keyword, tag, and symbol matching.
+5. **Dynamic Skill Catalog**: Reusable procedures and operational runbooks are stored in `public.skills`, allowing agents to dynamically look up and execute complex workflows created by other agents.
+
+---
+
+## 📚 Available Skills & How to Use Them
+
+Mnesia provides two levels of skills: the **agent-level skill** that teaches the agent how to coordinate, and the **database-level skill store** where agents publish and retrieve team runbooks dynamically.
+
+```mermaid
+flowchart LR
+    subgraph AgentLevel["Agent-Level Skill (.agents/skills/mnesia)"]
+        S1["SKILL.md Instructions"]
+        S2["Memory Taxonomy (fact, decision, etc.)"]
+        S3["Lifecycle Rules (Recall -> Work -> Store)"]
+    end
+
+    subgraph RemoteLevel["Remote Team Skills Store (public.skills)"]
+        R1["agent-coordination Runbook"]
+        R2["supabase-db-migration Runbook"]
+        R3["Custom Runbooks (Published by Agents)"]
+    end
+
+    AgentLevel -->|"Guides Agent Behavior"| RemoteLevel
+```
+
+### 1. The Core Agent Skill: `mnesia`
+Located at [`.agents/skills/mnesia/SKILL.md`](.agents/skills/mnesia/SKILL.md), this skill instructs autonomous agents on:
+- **Taxonomy**: Categorizing memories properly (`fact`, `decision`, `preference`, `instruction`, `reflection`, `summary`).
+- **Reconnaissance**: Always calling `recall_shared_memories()` before embarking on a task.
+- **Hygiene**: Storing concise, high-value technical facts instead of raw command logs.
+- **Handover**: Preparing structured summaries for successor agents.
+
+#### How to Install the Skill on Your Agent:
+- **For Google Antigravity (AGY)**: The skill is already located at `.agents/skills/mnesia/SKILL.md`. AGY automatically discovers skills in workspace `.agents/skills/`.
+- **For Claude Desktop / Cursor / Custom Agents**: Reference or include the contents of [`.agents/skills/mnesia/SKILL.md`](.agents/skills/mnesia/SKILL.md) in your agent's system prompt or project rules.
+
+---
+
+### 2. Available Team Skills in Supabase (`public.skills`)
+
+These operational runbooks are stored in Postgres and accessible to any connected agent in real time via MCP:
+
+| Skill Name | Description | Tags | Author |
+|---|---|---|---|
+| `agent-coordination` | Standard protocol for multi-agent swarm task coordination and handover. | `coordination`, `swarm` | `agent` |
+| `supabase-db-migration` | Safe process for running, indexing, and verifying schema changes in Supabase. | `database`, `devops` | `infra_agent` |
+
+---
+
+### 3. How Agents Use Remote Skills via MCP
+
+Agents discover, inspect, and contribute skills using three dedicated MCP tools:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Agent as Autonomous Agent
+    participant Edge as Supabase Edge Function
+    participant PG as PostgreSQL (public.skills)
+
+    Note over Agent,PG: Step 1: Discover available skills
+    Agent->>Edge: list_skills()
+    Edge->>PG: SELECT name, description, tags, author_agent FROM skills
+    PG-->>Edge: [ { name: "agent-coordination", ... }, { name: "supabase-db-migration", ... } ]
+    Edge-->>Agent: {"skills": [...]}
+
+    Note over Agent,PG: Step 2: Fetch full instructions
+    Agent->>Edge: get_skill(name="supabase-db-migration")
+    Edge->>PG: SELECT * FROM skills WHERE name = 'supabase-db-migration'
+    PG-->>Edge: Full instruction markdown
+    Edge-->>Agent: {"name": "...", "instructions": "1. Run schema.sql...\n2. Check health..."}
+
+    Note over Agent,PG: Step 3: Publish a new team skill
+    Agent->>Edge: publish_skill(name="deploy-service", description="...", instructions="...")
+    Edge->>PG: UPSERT INTO public.skills (name, description, instructions, ...)
+    PG-->>Edge: Success
+    Edge-->>Agent: {"success": true, "skill": "deploy-service"}
+```
+
+#### A. Discovering Skills (`list_skills`)
+```json
+{
+  "name": "list_skills",
+  "arguments": {}
+}
+```
+*Response:*
+```json
+{
+  "skills": [
+    {
+      "name": "agent-coordination",
+      "description": "Standard protocol for multi-agent swarm task coordination",
+      "tags": ["coordination", "swarm"],
+      "author_agent": "agent"
+    },
+    {
+      "name": "supabase-db-migration",
+      "description": "Run and verify schema migrations in Supabase using CLI",
+      "tags": ["database", "devops"],
+      "author_agent": "infra_agent"
+    }
+  ]
+}
+```
+
+#### B. Fetching Skill Instructions (`get_skill`)
+```json
+{
+  "name": "get_skill",
+  "arguments": {
+    "name": "agent-coordination"
+  }
+}
+```
+*Response:*
+```json
+{
+  "name": "agent-coordination",
+  "description": "Standard protocol for multi-agent swarm task coordination",
+  "instructions": "1. Call recall_shared_memories before work.\n2. Store findings with store_memory.\n3. Hand off cleanly.",
+  "tags": ["coordination", "swarm"],
+  "author_agent": "agent"
+}
+```
+
+#### C. Publishing a New Skill (`publish_skill`)
+When an agent perfects a new procedure (e.g. configuring a new service, troubleshooting an elusive bug, or deploying a build):
+```json
+{
+  "name": "publish_skill",
+  "arguments": {
+    "name": "docker-build-multiarch",
+    "description": "Cross-compile multi-arch Docker images with buildx and cache",
+    "instructions": "1. Run `docker buildx create --use`.\n2. Build with `--platform linux/amd64,linux/arm64`.\n3. Push with `--push` flag.",
+    "tags": ["docker", "devops", "ci"],
+    "author_agent": "build_agent"
+  }
+}
+```
 
 ---
 
@@ -151,27 +295,20 @@ If your MCP client does not support HTTP headers, append your key directly as a 
 
 ---
 
-## 🧠 How to Use Mnesia on Your Agent
+## 🧠 The Agent Lifecycle Workflow
 
-Once connected, your agent has access to 7 MCP tools. The repository includes an agent skill definition at [`.agents/skills/mnesia/SKILL.md`](.agents/skills/mnesia/SKILL.md).
-
-### The Recommended Agent Lifecycle
-
-```
-[Agent Starts Task]
-       │
-       ▼
-1. RECALL PEER MEMORIES  ──►  Did another agent solve or research this already?
-       │                      recall_shared_memories(query="...", exclude_self=True)
-       ▼
-2. PERFORM WORK          ──►  Agent writes code, tests, debugs, or analyzes.
-       │
-       ▼
-3. PERSIST KNOWLEDGE     ──►  Store critical facts, decisions, and gotchas.
-       │                      store_memory(content="...", category="fact|decision|preference")
-       ▼
-4. SHARE PROCEDURES      ──►  Store complex multi-step workflows as reusable skills.
-                              publish_skill(name="...", instructions="...")
+```mermaid
+flowchart TD
+    Start(["Agent Receives Task"]) --> Recall["1. Recall Peer Knowledge\nrecall_shared_memories(query, exclude_self=true)"]
+    Recall --> Found{"Peer memories found?"}
+    Found -- "Yes" --> Reuse["Incorporate peer findings &\navoid duplicate work"]
+    Found -- "No" --> Execute["2. Execute Task\nInvestigate, edit code, run tests"]
+    Reuse --> Execute
+    Execute --> Persist["3. Persist Key Learnings\nstore_memory(category='fact|decision|preference')"]
+    Persist --> HasRunbook{"Solved a repeatable procedure?"}
+    HasRunbook -- "Yes" --> Publish["4. Publish Reusable Skill\npublish_skill(name, instructions)"]
+    HasRunbook -- "No" --> Done(["Task Complete & Handover Ready"])
+    Publish --> Done
 ```
 
 ### Concrete Examples
@@ -209,20 +346,6 @@ Once connected, your agent has access to 7 MCP tools. The repository includes an
     "query": "how do we compute embeddings for agents?",
     "limit": 5,
     "match_threshold": 0.3
-  }
-}
-```
-
-#### 4. Publishing & Sharing Reusable Team Runbooks
-```json
-{
-  "name": "publish_skill",
-  "arguments": {
-    "name": "supabase-db-migration",
-    "description": "How to run and verify Supabase schema migrations in CI/CD",
-    "instructions": "1. Add SQL script to migrations directory...\n2. Run supabase db push --yes...\n3. Verify tables with curl health endpoint.",
-    "tags": ["database", "ci-cd"],
-    "author_agent": "infra_agent"
   }
 }
 ```
