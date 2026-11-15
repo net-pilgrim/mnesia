@@ -355,10 +355,13 @@ Deno.serve(async (req: Request) => {
     const encoder = new TextEncoder();
     let streamController: ReadableStreamDefaultController<Uint8Array>;
 
+    const host = req.headers.get("x-forwarded-host") || req.headers.get("host") || url.host;
+    const proto = req.headers.get("x-forwarded-proto") || "https";
+    const endpointUri = `${proto}://${host}/functions/v1/mcp/message?sessionId=${sessionId}`;
+
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {
         streamController = controller;
-        const endpointUri = `${url.origin}${url.pathname.replace(/\/sse$/, "")}/message?sessionId=${sessionId}`;
         controller.enqueue(encoder.encode(`event: endpoint\ndata: ${endpointUri}\n\n`));
       },
       cancel() {
@@ -397,7 +400,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // 2. POST /message?sessionId=... -> Client message handler (MCP SSE transport)
-  if (req.method === "POST" && (pathname.endsWith("/message") || url.searchParams.has("sessionId"))) {
+  if (req.method === "POST" && (pathname.includes("/message") || url.searchParams.has("sessionId"))) {
     const sessionId = url.searchParams.get("sessionId");
     if (!sessionId || !sessions.has(sessionId)) {
       return new Response(JSON.stringify({ error: "Session not found or expired" }), {
