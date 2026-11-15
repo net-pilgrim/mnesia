@@ -1,5 +1,0 @@
-fastmcp>=4.0.0
-supabase>=2.34.0
-pydantic-settings>=2.0.0
-openai>=3.0.0
-python-dotenv>=1.0.0
