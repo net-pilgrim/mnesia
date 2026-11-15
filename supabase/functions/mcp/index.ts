@@ -156,7 +156,7 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient, op
         const payload: any = { agent_id, session_id, category, content, tags, metadata };
         if (embedding) payload.embedding = embedding;
 
-        const { data, error } = await supabase.table("memories").insert(payload).select().single();
+        const { data, error } = await supabase.from("memories").insert(payload).select().single();
         if (error) return { isError: true, content: [{ type: "text", text: `Database Error: ${error.message} (Code: ${error.code})` }] };
         return { content: [{ type: "text", text: JSON.stringify({ success: true, memory: data }) }] };
       }
@@ -216,7 +216,7 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient, op
 
       case "list_memories": {
         const { agent_id, session_id, category, limit = 20 } = args;
-        let q = supabase.table("memories").select("*").order("created_at", { ascending: false }).limit(limit);
+        let q = supabase.from("memories").select("*").order("created_at", { ascending: false }).limit(limit);
         if (agent_id) q = q.eq("agent_id", agent_id);
         if (session_id) q = q.eq("session_id", session_id);
         if (category) q = q.eq("category", category);
@@ -226,21 +226,21 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient, op
       }
 
       case "list_skills": {
-        const { data, error } = await supabase.table("skills").select("name, description, tags, author_agent");
+        const { data, error } = await supabase.from("skills").select("name, description, tags, author_agent");
         if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
         return { content: [{ type: "text", text: JSON.stringify({ skills: data || [] }) }] };
       }
 
       case "get_skill": {
         const { name: skillName } = args;
-        const { data, error } = await supabase.table("skills").select("*").eq("name", skillName).single();
+        const { data, error } = await supabase.from("skills").select("*").eq("name", skillName).single();
         if (error) return { isError: true, content: [{ type: "text", text: `Skill '${skillName}' not found.` }] };
         return { content: [{ type: "text", text: JSON.stringify(data) }] };
       }
 
       case "publish_skill": {
         const { name: sName, description, instructions, tags = [], author_agent = "agent" } = args;
-        const { data, error } = await supabase.table("skills").upsert({
+        const { data, error } = await supabase.from("skills").upsert({
           name: sName,
           description,
           instructions,
