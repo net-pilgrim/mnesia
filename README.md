@@ -88,9 +88,9 @@ npx supabase functions deploy mcp --no-verify-jwt
 
 ---
 
-## 🔒 Authentication
+## 🔒 Authentication (Option 1: Supabase Key)
 
-When `MCP_API_KEY` is configured in Supabase secrets, your MCP server requires agents to authenticate.
+The MCP server authenticates requests using your Supabase **Secret (`service_role`)** or **Publishable (`anon`)** key.
 
 ### Method A: HTTP Header (Standard)
 ```json
@@ -99,19 +99,19 @@ When `MCP_API_KEY` is configured in Supabase secrets, your MCP server requires a
     "supabase-memory": {
       "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse",
       "headers": {
-        "Authorization": "Bearer YOUR_MCP_API_KEY"
+        "Authorization": "Bearer YOUR_SUPABASE_SERVICE_ROLE_KEY"
       }
     }
   }
 }
 ```
 
-### Method B: URL Token (For clients that don't support custom headers)
+### Method B: URL Query Parameter (For clients that don't support custom headers)
 ```json
 {
   "mcpServers": {
     "supabase-memory": {
-      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse?token=YOUR_MCP_API_KEY"
+      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse?apikey=YOUR_SUPABASE_SERVICE_ROLE_KEY"
     }
   }
 }

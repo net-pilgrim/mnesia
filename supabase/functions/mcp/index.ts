@@ -353,19 +353,20 @@ Deno.serve(async (req: Request) => {
     );
   }
 
-  // Authentication Check (Active if MCP_API_KEY secret is configured)
-  const expectedToken = Deno.env.get("MCP_API_KEY");
-  if (expectedToken) {
-    const authHeader = req.headers.get("authorization");
-    const apiKeyHeader = req.headers.get("x-api-key");
-    const tokenParam = url.searchParams.get("token") || url.searchParams.get("apiKey");
+  // Authentication: Verify Supabase API Key (service_role or anon key)
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const anonKey = Deno.env.get("SUPABASE_ANON_KEY");
+  const validKeys = [serviceKey, anonKey].filter(Boolean) as string[];
 
-    const isHeaderValid = authHeader === `Bearer ${expectedToken}` || apiKeyHeader === expectedToken;
-    const isParamValid = tokenParam === expectedToken;
+  if (validKeys.length > 0) {
+    const authHeader = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    const apiKeyHeader = req.headers.get("apikey");
+    const queryKey = url.searchParams.get("apikey") || url.searchParams.get("token") || url.searchParams.get("key");
 
-    if (!isHeaderValid && !isParamValid) {
+    const providedKey = authHeader || apiKeyHeader || queryKey;
+    if (!providedKey || !validKeys.includes(providedKey)) {
       return new Response(
-        JSON.stringify({ error: "Unauthorized: Invalid or missing MCP_API_KEY token" }),
+        JSON.stringify({ error: "Unauthorized: Missing or invalid Supabase API Key" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -378,8 +379,8 @@ Deno.serve(async (req: Request) => {
     let streamController: ReadableStreamDefaultController<Uint8Array>;
 
     const base = Deno.env.get("SUPABASE_URL") || `${url.protocol}//${url.host}`;
-    const tokenParam = url.searchParams.get("token") || url.searchParams.get("apiKey");
-    const authQuery = tokenParam ? `&token=${encodeURIComponent(tokenParam)}` : "";
+    const queryKey = url.searchParams.get("apikey") || url.searchParams.get("token") || url.searchParams.get("key");
+    const authQuery = queryKey ? `&apikey=${encodeURIComponent(queryKey)}` : "";
     const endpointUri = `${base}/functions/v1/mcp/message?sessionId=${sessionId}${authQuery}`;
 
     const readable = new ReadableStream<Uint8Array>({
