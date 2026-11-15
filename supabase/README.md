@@ -1,4 +1,4 @@
-# Supabase Edge Function: Multi-Agent MCP Memory Server
+# Supabase Edge Function: Mnesia MCP Memory Server
 
 Run your MCP Memory System natively inside **Supabase Edge Functions**.
 - ❌ No Docker containers
@@ -6,65 +6,53 @@ Run your MCP Memory System natively inside **Supabase Edge Functions**.
 - ❌ No Cloudflare account needed
 - ❌ No tunnels
 - ✅ **$0.00 / month** on your existing Supabase project
+- ✅ **Google Gemini 768-dim Embeddings** (1,500 req/min free tier)
 - ✅ Direct, zero-latency access to your Postgres database & `pgvector`
 
 ---
 
-## 🚀 3-Minute Deployment Guide
+## 🏗️ Architecture
 
-### Step 1: Ensure Your Database Schema is Applied
-If you haven't already, go to your [Supabase Dashboard](https://supabase.com/dashboard) -> **SQL Editor**, and run the entire contents of [`schema.sql`](../schema.sql).
-
----
-
-### Step 2: Link Your Supabase Project
-Run this command from your terminal:
-```bash
-npx supabase login
-npx supabase link --project-ref <YOUR_PROJECT_REF>
 ```
-*(Your project reference is found in your Supabase dashboard URL: `https://supabase.com/dashboard/project/<PROJECT_REF>`)*
-
----
-
-### Step 3: (Optional) Set OpenAI API Key for Vector Embeddings
-If you want semantic vector similarity search via `pgvector`:
-```bash
-npx supabase secrets set OPENAI_API_KEY=sk-your-openai-api-key
-```
-*(If omitted, the function automatically uses PostgreSQL Full-Text Search and keyword matching at zero extra cost).*
-
----
-
-### Step 4: Deploy the Edge Function
-Deploy the function with one command:
-```bash
-npx supabase functions deploy mcp --no-verify-jwt
-```
-
-That's it! Your serverless MCP server is live at:
-```
-https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse
+[Agent: AGY / Claude / Cursor]
+              │
+              │  Model Context Protocol (SSE / JSON-RPC over HTTPS)
+              ▼
+[Supabase Edge Function: /functions/v1/mcp]
+   ├─ Auth: Verifies Supabase API Key (service_role or anon)
+   ├─ Embeddings: Calls Google Gemini (gemini-embedding-001 @ 768 dims)
+   └─ Postgres: Executes pgvector HNSW match_memories RPC & FTS
 ```
 
 ---
 
-## 🧪 Test Your Deployment
+## ⚙️ Configuration
 
-Verify the function is active:
-```bash
-curl https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/health
-```
-Response:
-```json
-{"status":"healthy","server":"MnesiaMemorySystem","runtime":"supabase-edge"}
-```
+### 1. Configure Supabase Database
+In your [Supabase Dashboard](https://supabase.com/dashboard) -> **SQL Editor**, run the entire [`schema.sql`](../schema.sql) script to enable `pgvector` (768 dimensions), create the tables, indexes, and RPC functions.
+
+### 2. Configure Google AI Studio (Gemini)
+1. Go to [Google AI Studio](https://aistudio.google.com).
+2. Click **Get API key** -> **Create API key**.
+3. Set the key into your Supabase project secrets:
+   ```bash
+   npx supabase secrets set GEMINI_API_KEY=AIzaSy... --project-ref <YOUR_PROJECT_REF>
+   ```
+
+### 3. Deploy Function
+- **Via GitHub Actions (Recommended)**: Set `SUPABASE_ACCESS_TOKEN`, `SUPABASE_URL`, and `GEMINI_API_KEY` in your GitHub repository secrets. Every push to `main` deploys automatically.
+- **Via CLI**:
+  ```bash
+  npx supabase login
+  npx supabase link --project-ref <YOUR_PROJECT_REF>
+  npx supabase functions deploy mcp --no-verify-jwt
+  ```
 
 ---
 
-## 🤖 Connect Your Remote Agents
+## 🤖 How to Use on Your Agent
 
-In your agent's MCP configuration (Claude Desktop, Cursor, Antigravity, or custom agents):
+Configure your MCP client:
 
 ### Method A: HTTP Header (Standard)
 ```json
@@ -89,4 +77,9 @@ In your agent's MCP configuration (Claude Desktop, Cursor, Antigravity, or custo
     }
   }
 }
+```
+
+### Test Deployment
+```bash
+curl https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/health?test=embedding
 ```
