@@ -136,6 +136,7 @@ async function generateEmbeddingWithStatus(text: string): Promise<{ embedding: n
           body: JSON.stringify({
             model: "models/gemini-embedding-001",
             content: { parts: [{ text: cleanText }] },
+            outputDimensionality: 768,
           }),
         }
       );
