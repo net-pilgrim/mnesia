@@ -16,7 +16,7 @@ create table if not exists public.memories (
     content text not null,                         -- The memory content / knowledge snippet
     tags text[] default '{}'::text[] not null,    -- Tags for filtering and grouping
     metadata jsonb default '{}'::jsonb not null,  -- Arbitrary metadata (confidence, context, sources, etc.)
-    embedding vector(1536)                        -- Vector embedding (default dimension 1536 for text-embedding-3-small)
+    embedding vector(768)                         -- Vector embedding (768 dimensions for Gemini text-embedding-004)
 );
 
 -- 3. Automatic timestamp updater trigger
@@ -51,7 +51,7 @@ create index if not exists idx_memories_embedding on public.memories
 
 -- 5. RPC function: match_memories (Vector Semantic Search)
 create or replace function match_memories (
-    query_embedding vector(1536),
+    query_embedding vector(768),
     match_threshold float default 0.2,
     match_count int default 10,
     filter_agent_id text default null,

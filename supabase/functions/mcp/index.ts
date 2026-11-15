@@ -116,43 +116,80 @@ const MCP_TOOLS = [
 ];
 
 /**
- * Generate vector embeddings with OpenAI or fallback
+ * Generate vector embeddings with Gemini text-embedding-004 (primary) or OpenAI (fallback)
  */
-async function generateEmbedding(text: string, apiKey?: string): Promise<number[] | null> {
-  if (!apiKey) return null;
-  try {
-    const res = await fetch("https://api.openai.com/v1/embeddings", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        input: text.replace(/\n/g, " ").trim(),
-        model: "text-embedding-3-small",
-        dimensions: 1536,
-      }),
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    return data.data?.[0]?.embedding || null;
-  } catch (err) {
-    console.error("Embedding generation error:", err);
-    return null;
+async function generateEmbedding(text: string): Promise<number[] | null> {
+  const cleanText = text.replace(/\n/g, " ").trim();
+  if (!cleanText) return null;
+
+  // 1. Primary: Google Gemini text-embedding-004 (768 dimensions, 1,500 req/min free)
+  const geminiKey = Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GOOGLE_API_KEY");
+  if (geminiKey) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${geminiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "models/text-embedding-004",
+            content: { parts: [{ text: cleanText }] },
+          }),
+        }
+      );
+      if (res.ok) {
+        const data: any = await res.json();
+        if (data.embedding?.values) {
+          return data.embedding.values;
+        }
+      } else {
+        const errText = await res.text();
+        console.error("Gemini embedding error response:", errText);
+      }
+    } catch (err) {
+      console.error("Gemini embedding request failed:", err);
+    }
   }
+
+  // 2. Fallback: OpenAI text-embedding-3-small (dimensions reduced to 768)
+  const openaiKey = Deno.env.get("OPENAI_API_KEY");
+  if (openaiKey) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/embeddings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          input: cleanText,
+          model: "text-embedding-3-small",
+          dimensions: 768,
+        }),
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        return data.data?.[0]?.embedding || null;
+      }
+    } catch (err) {
+      console.error("OpenAI embedding request failed:", err);
+    }
+  }
+
+  return null;
 }
 
 /**
  * Execute tool calls against Supabase
  */
-async function executeTool(name: string, args: any, supabase: SupabaseClient, openaiApiKey?: string): Promise<any> {
+async function executeTool(name: string, args: any, supabase: SupabaseClient): Promise<any> {
   args = args || {};
 
   try {
     switch (name) {
       case "store_memory": {
         const { content, agent_id = "default_agent", category = "general", tags = [], session_id, metadata = {} } = args;
-        const embedding = await generateEmbedding(content, openaiApiKey);
+        const embedding = await generateEmbedding(content);
         const payload: any = { agent_id, session_id, category, content, tags, metadata };
         if (embedding) payload.embedding = embedding;
 
@@ -163,7 +200,7 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient, op
 
       case "search_memories": {
         const { query, agent_id, session_id, category, tags, limit = 10, match_threshold = 0.2 } = args;
-        const embedding = await generateEmbedding(query, openaiApiKey);
+        const embedding = await generateEmbedding(query);
 
         if (embedding) {
           const { data, error } = await supabase.rpc("match_memories", {
@@ -264,8 +301,7 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient, op
  */
 async function handleJsonRpc(
   msg: any,
-  supabase: SupabaseClient,
-  openaiApiKey?: string
+  supabase: SupabaseClient
 ): Promise<any | null> {
   const { jsonrpc, id, method, params } = msg;
 
@@ -308,7 +344,7 @@ async function handleJsonRpc(
   if (method === "tools/call") {
     const toolName = params?.name;
     const toolArgs = params?.arguments;
-    const toolResult = await executeTool(toolName, toolArgs, supabase, openaiApiKey);
+    const toolResult = await executeTool(toolName, toolArgs, supabase);
     return {
       jsonrpc: "2.0",
       id,
@@ -437,7 +473,7 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
 
     // Process JSON-RPC message asynchronously and stream result back via SSE
-    handleJsonRpc(body, supabase, openaiApiKey).then((response) => {
+    handleJsonRpc(body, supabase).then((response) => {
       if (response) {
         session.send(response);
       }
@@ -460,7 +496,7 @@ Deno.serve(async (req: Request) => {
   if (req.method === "POST") {
     try {
       const body = await req.json();
-      const response = await handleJsonRpc(body, supabase, openaiApiKey);
+      const response = await handleJsonRpc(body, supabase);
       return new Response(JSON.stringify(response || {}), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
