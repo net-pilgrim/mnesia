@@ -68,13 +68,12 @@ A persistent, shared memory system for AI agents built natively on **Supabase Ed
 Execute [`schema.sql`](schema.sql) in your [Supabase SQL Editor](https://supabase.com/dashboard) to enable `pgvector` and create the `memories` and `skills` tables.
 
 ### 2. Automated GitHub CI/CD Deployment
-Add these two secrets to your GitHub repository (**Settings** -> **Secrets and variables** -> **Actions**):
+Add these secrets to your GitHub repository (**Settings** -> **Secrets and variables** -> **Actions**):
 
 | Secret Name | Value |
 |---|---|
 | `SUPABASE_ACCESS_TOKEN` | Created at [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens) |
 | `SUPABASE_URL` | `https://<YOUR_PROJECT_REF>.supabase.co` |
-| `MCP_API_KEY` *(Optional)* | Custom secret token to authenticate agents |
 | `OPENAI_API_KEY` *(Optional)* | For semantic vector embeddings |
 
 Every push to `main` automatically deploys the Edge Function.

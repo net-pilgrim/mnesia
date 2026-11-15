@@ -66,11 +66,26 @@ Response:
 
 In your agent's MCP configuration (Claude Desktop, Cursor, Antigravity, or custom agents):
 
+### Method A: HTTP Header (Standard)
 ```json
 {
   "mcpServers": {
     "supabase-memory": {
-      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse"
+      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_SUPABASE_SERVICE_ROLE_KEY"
+      }
+    }
+  }
+}
+```
+
+### Method B: URL Query Parameter
+```json
+{
+  "mcpServers": {
+    "supabase-memory": {
+      "url": "https://<YOUR_PROJECT_REF>.supabase.co/functions/v1/mcp/sse?apikey=YOUR_SUPABASE_SERVICE_ROLE_KEY"
     }
   }
 }

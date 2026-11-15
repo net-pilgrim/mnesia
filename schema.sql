@@ -1,5 +1,5 @@
 -- ==============================================================================
--- Supabase Schema for Multi-Agent FastMCP Memory System (Mnesia)
+-- Supabase Schema for Multi-Agent MCP Memory System (Mnesia)
 -- ==============================================================================
 
 -- 1. Enable pgvector extension (for vector similarity search)
@@ -168,7 +168,7 @@ create policy "Allow anon access for development" on public.memories
     with check (true);
 
 -- ==============================================================================
--- 8. Skills Table (Dynamic Skills Registry exposed via FastMCP)
+-- 8. Skills Table (Dynamic Skills Registry exposed via MCP)
 -- ==============================================================================
 create table if not exists public.skills (
     id uuid primary key default gen_random_uuid(),

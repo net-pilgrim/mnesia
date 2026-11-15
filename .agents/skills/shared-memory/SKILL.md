@@ -2,12 +2,12 @@
 name: shared-memory
 description: >-
   Guide and best practices for storing, querying, and sharing persistent memories and skills
-  across multi-agent fleets using the FastMCP Supabase Memory System.
+  across multi-agent fleets using the Supabase Edge MCP Memory System.
 ---
 
 # Shared Memory & Multi-Agent Collaboration Skill
 
-This skill instructs agents on how to leverage the FastMCP Supabase Memory server (`MnesiaMemorySystem`) to coordinate with other agents, persist critical discoveries, avoid duplicate work, and share skills across sessions.
+This skill instructs agents on how to leverage the Supabase Edge MCP Memory server (`MnesiaMemorySystem`) to coordinate with other agents, persist critical discoveries, avoid duplicate work, and share skills across sessions.
 
 ---
 
