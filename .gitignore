@@ -6,6 +6,7 @@
 
 # Supabase Local State & Secrets
 .supabase/
+supabase/.temp/
 
 # Node
 node_modules/
