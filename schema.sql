@@ -22,6 +22,9 @@ create table if not exists public.memories (
     embedding vector(768)                         -- Vector embedding (768 dimensions for Gemini gemini-embedding-001)
 );
 
+-- Ensure column exists if migrating an existing memories table
+alter table public.memories add column if not exists content_hash text;
+
 -- 3. Automatic timestamp updater trigger
 create or replace function update_updated_at_column()
 returns trigger as $$
@@ -156,7 +159,9 @@ $$;
 
 -- 7. Row Level Security (RLS) - memories
 alter table public.memories enable row level security;
+drop policy if exists "Allow service role full access on memories" on public.memories;
 create policy "Allow service role full access on memories" on public.memories for all to service_role using (true) with check (true);
+drop policy if exists "Allow anon access for development on memories" on public.memories;
 create policy "Allow anon access for development on memories" on public.memories for all to anon using (true) with check (true);
 
 -- ==============================================================================
@@ -184,7 +189,9 @@ create index if not exists idx_skills_name on public.skills(name);
 create index if not exists idx_skills_tags on public.skills using gin(tags);
 
 alter table public.skills enable row level security;
+drop policy if exists "Allow service role full access on skills" on public.skills;
 create policy "Allow service role full access on skills" on public.skills for all to service_role using (true) with check (true);
+drop policy if exists "Allow anon access on skills" on public.skills;
 create policy "Allow anon access on skills" on public.skills for all to anon using (true) with check (true);
 
 -- ==============================================================================
@@ -247,15 +254,21 @@ create index if not exists idx_memory_entities_memory_id on public.memory_entiti
 
 -- 9.4 Row Level Security (RLS) - Knowledge Graph
 alter table public.entities enable row level security;
+drop policy if exists "Allow service role full access on entities" on public.entities;
 create policy "Allow service role full access on entities" on public.entities for all to service_role using (true) with check (true);
+drop policy if exists "Allow anon access on entities" on public.entities;
 create policy "Allow anon access on entities" on public.entities for all to anon using (true) with check (true);
 
 alter table public.relations enable row level security;
+drop policy if exists "Allow service role full access on relations" on public.relations;
 create policy "Allow service role full access on relations" on public.relations for all to service_role using (true) with check (true);
+drop policy if exists "Allow anon access on relations" on public.relations;
 create policy "Allow anon access on relations" on public.relations for all to anon using (true) with check (true);
 
 alter table public.memory_entities enable row level security;
+drop policy if exists "Allow service role full access on memory_entities" on public.memory_entities;
 create policy "Allow service role full access on memory_entities" on public.memory_entities for all to service_role using (true) with check (true);
+drop policy if exists "Allow anon access on memory_entities" on public.memory_entities;
 create policy "Allow anon access on memory_entities" on public.memory_entities for all to anon using (true) with check (true);
 
 -- 9.5 RPC: resolve_or_create_entity (Fuzzy Trigram & Alias Resolution)
