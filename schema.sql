@@ -291,7 +291,15 @@ begin
       and type = entity_type
     limit 1;
 
-    -- 2. If not found, check if clean_name exists in any aliases array
+    -- 2. If not found by type, match by lower(name) alone
+    if target_id is null then
+        select id into target_id
+        from public.entities
+        where lower(name) = lower(clean_name)
+        limit 1;
+    end if;
+
+    -- 3. If not found, check if clean_name exists in any aliases array
     if target_id is null then
         select id into target_id
         from public.entities

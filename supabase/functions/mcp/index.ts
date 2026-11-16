@@ -304,10 +304,11 @@ interface EntityInput {
 async function resolveOrCreateEntity(
   supabase: SupabaseClient,
   entityInput: string | EntityInput,
-  defaultType: string = "concept"
+  explicitType?: string
 ): Promise<{ id: string; name: string; type: string } | null> {
   const name = typeof entityInput === "string" ? entityInput.trim() : entityInput.name?.trim();
-  const type = typeof entityInput === "object" && entityInput.type ? entityInput.type.trim() : defaultType;
+  const type = typeof entityInput === "object" && entityInput.type ? entityInput.type.trim() : (explicitType || "concept");
+  const hasExplicitType = Boolean(typeof entityInput === "object" ? entityInput.type : explicitType);
   const aliases = typeof entityInput === "object" && Array.isArray(entityInput.aliases) ? entityInput.aliases : [];
   const metadata = typeof entityInput === "object" && entityInput.metadata ? entityInput.metadata : {};
 
@@ -327,14 +328,27 @@ async function resolveOrCreateEntity(
     // Fall back to direct table access
   }
 
-  // 2. Direct lookup by lower(name) and type
-  const { data: existing } = await supabase
-    .from("entities")
-    .select("id, name, type, aliases")
-    .ilike("name", name)
-    .eq("type", type)
-    .limit(1)
-    .maybeSingle();
+  // 2. Direct lookup: try matching by name and type if explicit type given
+  let existing: any = null;
+  if (hasExplicitType) {
+    const { data: typedMatch } = await supabase
+      .from("entities")
+      .select("id, name, type, aliases")
+      .ilike("name", name)
+      .eq("type", type)
+      .limit(1);
+    if (typedMatch && typedMatch.length > 0) existing = typedMatch[0];
+  }
+
+  // If not found or no explicit type, match by name across any type to reuse existing entities
+  if (!existing) {
+    const { data: nameMatch } = await supabase
+      .from("entities")
+      .select("id, name, type, aliases")
+      .ilike("name", name)
+      .limit(1);
+    if (nameMatch && nameMatch.length > 0) existing = nameMatch[0];
+  }
 
   if (existing) {
     if (aliases.length > 0) {
@@ -347,14 +361,14 @@ async function resolveOrCreateEntity(
   }
 
   // 3. Check if name exists in any entity's aliases array
-  const { data: aliasMatch } = await supabase
+  const { data: aliasMatches } = await supabase
     .from("entities")
     .select("id, name, type, aliases")
     .contains("aliases", [name])
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
 
-  if (aliasMatch) {
+  if (aliasMatches && aliasMatches.length > 0) {
+    const aliasMatch = aliasMatches[0];
     return { id: aliasMatch.id, name: aliasMatch.name, type: aliasMatch.type };
   }
 
@@ -396,8 +410,8 @@ async function linkEntitiesHelper(
   rel: RelationInput,
   memoryId?: string
 ): Promise<any> {
-  const srcEntity = await resolveOrCreateEntity(supabase, rel.src, rel.src_type || "concept");
-  const dstEntity = await resolveOrCreateEntity(supabase, rel.dst, rel.dst_type || "concept");
+  const srcEntity = await resolveOrCreateEntity(supabase, rel.src, rel.src_type);
+  const dstEntity = await resolveOrCreateEntity(supabase, rel.dst, rel.dst_type);
 
   if (!srcEntity || !dstEntity) {
     throw new Error(`Failed to resolve entities for relation: '${rel.src}' -> '${rel.dst}'`);
@@ -666,7 +680,7 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
       }
 
       case "get_entity": {
-        const { name: entityName, entity_id: entityId, active_only = true } = args;
+        const { name: entityName, entity_id: entityId, active_only = true, type: entityType } = args;
         if (!entityName && !entityId) {
           return { isError: true, content: [{ type: "text", text: "Must provide either 'name' or 'entity_id'" }] };
         }
@@ -676,9 +690,11 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
           query = query.eq("id", entityId);
         } else {
           query = query.ilike("name", entityName.trim());
+          if (entityType) query = query.eq("type", entityType.trim());
         }
 
-        const { data: entity, error: entityErr } = await query.maybeSingle();
+        const { data: entityRows, error: entityErr } = await query.limit(1);
+        const entity = entityRows && entityRows.length > 0 ? entityRows[0] : null;
         if (entityErr || !entity) {
           return { isError: true, content: [{ type: "text", text: `Entity '${entityName || entityId}' not found.` }] };
         }
