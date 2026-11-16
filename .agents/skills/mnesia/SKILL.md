@@ -1,63 +1,93 @@
 ---
 name: mnesia
 description: >-
-  Guide and best practices for storing, querying, and sharing persistent memories and skills
-  across multi-agent fleets using the Mnesia Supabase Edge MCP Memory System.
+  Guide and best practices for storing, querying, and sharing persistent memories,
+  knowledge graphs, and skills across multi-agent fleets using the Mnesia Supabase Edge MCP Memory System.
 ---
 
-# Mnesia: Multi-Agent Shared Memory & Skills System
+# Mnesia: Multi-Agent Shared Memory, Knowledge Graph & Skills System
 
-This skill instructs agents on how to leverage the Supabase Edge MCP Memory server (`MnesiaMemorySystem`) to coordinate with other agents, persist critical discoveries, avoid duplicate work, and share skills across sessions.
+This skill instructs agents on how to leverage the Supabase Edge MCP Memory server (`MnesiaMemorySystem`) to coordinate with other agents, persist critical discoveries, ground knowledge graph entities and relations, avoid duplicate work, and share operational skills across sessions.
 
 ---
 
-## 🎯 When to Call Memory Tools
+## 🎯 When to Call Memory & Graph Tools
 
-Agent Action | Appropriate MCP Tool | Example Category
+Agent Action | Appropriate MCP Tool | Example Scope / Category
 :--- | :--- | :---
-**Starting a subtask** | `recall_shared_memories(query=...)` | -
-**Discovering an environment/code fact** | `store_memory(content=..., category='fact')` | `fact`
-**Making a design/architecture choice** | `store_memory(content=..., category='decision')` | `decision`
+**Starting a subtask** | `recall_shared_memories(query=...)` | Multi-agent coordination
+**Exploring concepts & links** | `search_graph(query=..., max_depth=1)` | Knowledge graph traversal
+**Inspecting an entity** | `get_entity(name=...)` | Inspect entity, edges & memories
+**Discovering an environment/code fact** | `store_memory(content=..., category='fact', entities=[...], relations=[...])` | `fact`
+**Making a design/architecture choice** | `store_memory(content=..., category='decision', entities=[...], relations=[...])` | `decision`
+**Linking two known entities** | `link_entities(src=..., dst=..., predicate=...)` | Direct knowledge graph link
 **Recording user constraints/instructions** | `store_memory(content=..., category='preference')` | `preference`
 **Finishing a task & preparing handover** | `store_memory(content=..., category='summary')` | `summary`
-**Learning a reusable procedural workflow** | `publish_skill(name=..., instructions=...)` | -
+**Learning a reusable procedural workflow** | `publish_skill(name=..., instructions=...)` | Runbook publication
 
 ---
 
 ## 🔄 Core Workflows
 
-### 1. Pre-Task Reconnaissance (Peer Memory Recall)
+### 1. Pre-Task Reconnaissance (Peer Memory Recall & Graph Exploration)
 Before inspecting files or writing code, check if a peer agent has already investigated the topic:
 
 ```python
-# Query shared knowledge (excluding memories authored by yourself)
+# 1. Query shared knowledge (excluding memories authored by yourself)
 results = recall_shared_memories(
     query="authentication tokens storage AES",
     current_agent_id="coder_agent",
     exclude_self=True,
     session_id="project_alpha"
 )
-```
 
-### 2. Storing High-Value Findings
-Do **not** flood the memory store with raw terminal dumps or trivial logs. Only persist:
-- High-level architectural decisions
-- Non-obvious bug root causes
-- Port, configuration, or environment constants
-- Verified user requirements
-
-```python
-store_memory(
-    content="Production database requires SSL mode verify-full with custom CA at /etc/ssl/certs/supabase.crt",
-    agent_id="infra_agent",
-    category="fact",
-    tags=["database", "ssl", "postgres"],
-    session_id="project_alpha",
-    metadata={"verified": True, "ticket": "INFRA-42"}
+# 2. Explore related entities and architecture decisions in the knowledge graph
+graph_info = search_graph(
+    query="TokenVault",
+    max_depth=1
 )
 ```
 
-### 3. Executing or Publishing a Team Skill
+### 2. Storing Grounded Findings with Knowledge Graph Entities & Relations
+Do **not** flood the memory store with raw terminal dumps or trivial logs. Only persist high-value insights. When storing memories, **always supply `entities` and `relations`** when technical concepts or relationships are identified—this populates the knowledge graph with zero extra LLM overhead:
+
+```python
+store_memory(
+    content="TokenVault requires AES-256-GCM encryption with PBKDF2 key derivation for OAuth tokens",
+    agent_id="coder_agent",
+    category="decision",
+    tags=["security", "oauth", "crypto"],
+    session_id="project_alpha",
+    entities=[
+        {"name": "TokenVault", "type": "component"},
+        {"name": "AES-256-GCM", "type": "technology"},
+        {"name": "OAuth", "type": "concept"}
+    ],
+    relations=[
+        {"src": "TokenVault", "dst": "AES-256-GCM", "predicate": "uses"},
+        {"src": "TokenVault", "dst": "OAuth", "predicate": "protects"}
+    ],
+    metadata={"verified": True, "ticket": "SEC-104"}
+)
+```
+
+### 3. Knowledge Graph Entity Lookup & Direct Linking
+To inspect an entity's outgoing/incoming relations or directly assert a relationship:
+
+```python
+# 1. Retrieve entity details and grounded memories
+entity = get_entity(name="TokenVault")
+
+# 2. Link entities directly (e.g. when establishing dependencies or superseding an architecture)
+link_entities(
+    src="ServiceAPI",
+    dst="TokenVault",
+    predicate="depends_on",
+    invalidate_previous=False
+)
+```
+
+### 4. Executing or Publishing a Team Skill
 When an operational procedure must be executed consistently across agents:
 
 ```python

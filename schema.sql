@@ -1,9 +1,11 @@
 -- ==============================================================================
 -- Supabase Schema for Multi-Agent MCP Memory System (Mnesia)
+-- Knowledge Graph & Vector Memory Architecture
 -- ==============================================================================
 
--- 1. Enable pgvector extension (for vector similarity search)
+-- 1. Enable required extensions
 create extension if not exists vector;
+create extension if not exists pg_trgm;
 
 -- 2. Create the memories table
 create table if not exists public.memories (
@@ -14,6 +16,7 @@ create table if not exists public.memories (
     session_id text,                              -- Optional session/workflow/conversation scope
     category text default 'general' not null,     -- e.g. 'fact', 'decision', 'preference', 'instruction', 'reflection', 'summary'
     content text not null,                         -- The memory content / knowledge snippet
+    content_hash text,                            -- SHA-256 hash of normalized content to prevent duplicate embeddings
     tags text[] default '{}'::text[] not null,    -- Tags for filtering and grouping
     metadata jsonb default '{}'::jsonb not null,  -- Arbitrary metadata (confidence, context, sources, etc.)
     embedding vector(768)                         -- Vector embedding (768 dimensions for Gemini gemini-embedding-001)
@@ -41,6 +44,7 @@ create index if not exists idx_memories_category on public.memories(category);
 create index if not exists idx_memories_created_at on public.memories(created_at desc);
 create index if not exists idx_memories_tags on public.memories using gin(tags);
 create index if not exists idx_memories_metadata on public.memories using gin(metadata);
+create index if not exists idx_memories_content_hash on public.memories(content_hash);
 
 -- Full-text search index on content
 create index if not exists idx_memories_fts on public.memories using gin(to_tsvector('english', content));
@@ -150,22 +154,10 @@ begin
 end;
 $$;
 
--- 7. Row Level Security (RLS) - enabled by default; configure policies based on your auth model
+-- 7. Row Level Security (RLS) - memories
 alter table public.memories enable row level security;
-
--- Allow service role full access:
-create policy "Allow service role full access" on public.memories
-    for all
-    to service_role
-    using (true)
-    with check (true);
-
--- Allow public read/write if using anon key in a trusted/local server environment:
-create policy "Allow anon access for development" on public.memories
-    for all
-    to anon
-    using (true)
-    with check (true);
+create policy "Allow service role full access on memories" on public.memories for all to service_role using (true) with check (true);
+create policy "Allow anon access for development on memories" on public.memories for all to anon using (true) with check (true);
 
 -- ==============================================================================
 -- 8. Skills Table (Dynamic Skills Registry exposed via MCP)
@@ -195,3 +187,258 @@ alter table public.skills enable row level security;
 create policy "Allow service role full access on skills" on public.skills for all to service_role using (true) with check (true);
 create policy "Allow anon access on skills" on public.skills for all to anon using (true) with check (true);
 
+-- ==============================================================================
+-- 9. Knowledge Graph Architecture (Entities, Relations, Memory Grounding)
+-- ==============================================================================
+
+-- 9.1 Entities Table
+create table if not exists public.entities (
+    id uuid primary key default gen_random_uuid(),
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    name text not null,
+    type text default 'concept' not null,          -- e.g. 'concept', 'component', 'decision', 'system', 'agent', 'technology'
+    aliases text[] default '{}'::text[] not null,  -- Alternate synonyms, short forms, or casing variants
+    metadata jsonb default '{}'::jsonb not null
+);
+
+-- Unique index on normalized (lower name, type)
+create unique index if not exists uq_idx_entities_lower_name_type on public.entities (lower(name), type);
+
+drop trigger if exists set_entities_updated_at on public.entities;
+create trigger set_entities_updated_at
+    before update on public.entities
+    for each row
+    execute function update_updated_at_column();
+
+create index if not exists idx_entities_name_trgm on public.entities using gin(name gin_trgm_ops);
+create index if not exists idx_entities_aliases on public.entities using gin(aliases);
+create index if not exists idx_entities_type on public.entities(type);
+
+-- 9.2 Relations Table (Graph Edges with Temporal Validity)
+create table if not exists public.relations (
+    id uuid primary key default gen_random_uuid(),
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    src uuid not null references public.entities(id) on delete cascade,
+    dst uuid not null references public.entities(id) on delete cascade,
+    predicate text not null,                       -- e.g. 'depends_on', 'implements', 'uses', 'replaces', 'relates_to'
+    memory_id uuid references public.memories(id) on delete set null, -- Optional evidence memory
+    valid_from timestamp with time zone default timezone('utc'::text, now()) not null,
+    valid_to timestamp with time zone,             -- null = active; non-null timestamp = superseded/invalidated edge
+    metadata jsonb default '{}'::jsonb not null
+);
+
+create index if not exists idx_relations_src on public.relations(src);
+create index if not exists idx_relations_dst on public.relations(dst);
+create index if not exists idx_relations_predicate on public.relations(predicate);
+create index if not exists idx_relations_memory_id on public.relations(memory_id);
+create index if not exists idx_relations_valid on public.relations(valid_from, valid_to);
+
+-- 9.3 Memory <-> Entities Junction Table (Grounding)
+create table if not exists public.memory_entities (
+    memory_id uuid not null references public.memories(id) on delete cascade,
+    entity_id uuid not null references public.entities(id) on delete cascade,
+    created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+    primary key (memory_id, entity_id)
+);
+
+create index if not exists idx_memory_entities_entity_id on public.memory_entities(entity_id);
+create index if not exists idx_memory_entities_memory_id on public.memory_entities(memory_id);
+
+-- 9.4 Row Level Security (RLS) - Knowledge Graph
+alter table public.entities enable row level security;
+create policy "Allow service role full access on entities" on public.entities for all to service_role using (true) with check (true);
+create policy "Allow anon access on entities" on public.entities for all to anon using (true) with check (true);
+
+alter table public.relations enable row level security;
+create policy "Allow service role full access on relations" on public.relations for all to service_role using (true) with check (true);
+create policy "Allow anon access on relations" on public.relations for all to anon using (true) with check (true);
+
+alter table public.memory_entities enable row level security;
+create policy "Allow service role full access on memory_entities" on public.memory_entities for all to service_role using (true) with check (true);
+create policy "Allow anon access on memory_entities" on public.memory_entities for all to anon using (true) with check (true);
+
+-- 9.5 RPC: resolve_or_create_entity (Fuzzy Trigram & Alias Resolution)
+create or replace function resolve_or_create_entity (
+    entity_name text,
+    entity_type text default 'concept',
+    entity_aliases text[] default '{}'::text[]
+)
+returns uuid
+language plpgsql
+as $$
+declare
+    target_id uuid;
+    clean_name text := trim(entity_name);
+begin
+    -- 1. Try to match lower(name) and type
+    select id into target_id
+    from public.entities
+    where lower(name) = lower(clean_name)
+      and type = entity_type
+    limit 1;
+
+    -- 2. If not found, check if clean_name exists in any aliases array
+    if target_id is null then
+        select id into target_id
+        from public.entities
+        where entity_aliases && aliases
+           or clean_name = any(aliases)
+        limit 1;
+    end if;
+
+    -- 3. If found, merge new aliases
+    if target_id is not null then
+        if array_length(entity_aliases, 1) > 0 then
+            update public.entities
+            set aliases = array(
+                select distinct unnest(aliases || entity_aliases)
+            )
+            where id = target_id;
+        end if;
+        return target_id;
+    end if;
+
+    -- 4. Otherwise create new entity
+    insert into public.entities (name, type, aliases)
+    values (clean_name, entity_type, entity_aliases)
+    returning id into target_id;
+
+    return target_id;
+end;
+$$;
+
+-- 9.6 RPC: traverse_knowledge_graph (Recursive CTE Multi-Hop Graph Traversal)
+create or replace function traverse_knowledge_graph (
+    root_entity_id uuid,
+    max_depth int default 2,
+    active_only boolean default true
+)
+returns table (
+    depth int,
+    src_id uuid,
+    src_name text,
+    src_type text,
+    predicate text,
+    dst_id uuid,
+    dst_name text,
+    dst_type text,
+    relation_id uuid,
+    memory_id uuid,
+    valid_from timestamp with time zone,
+    valid_to timestamp with time zone
+)
+language sql
+as $$
+with recursive graph_walk as (
+    -- Anchor member (depth 1)
+    select
+        1 as depth,
+        r.id as relation_id,
+        r.src as src_id,
+        s.name as src_name,
+        s.type as src_type,
+        r.predicate,
+        r.dst as dst_id,
+        d.name as dst_name,
+        d.type as dst_type,
+        r.memory_id,
+        r.valid_from,
+        r.valid_to,
+        array[r.src, r.dst] as visited_entities
+    from public.relations r
+    join public.entities s on s.id = r.src
+    join public.entities d on d.id = r.dst
+    where (r.src = root_entity_id or r.dst = root_entity_id)
+      and (not active_only or r.valid_to is null or r.valid_to > timezone('utc'::text, now()))
+
+    union all
+
+    -- Recursive member (depth > 1)
+    select
+        gw.depth + 1 as depth,
+        r.id as relation_id,
+        r.src as src_id,
+        s.name as src_name,
+        s.type as src_type,
+        r.predicate,
+        r.dst as dst_id,
+        d.name as dst_name,
+        d.type as dst_type,
+        r.memory_id,
+        r.valid_from,
+        r.valid_to,
+        gw.visited_entities || case when r.src = any(gw.visited_entities) then r.dst else r.src end
+    from public.relations r
+    join graph_walk gw on (r.src = gw.dst_id or r.dst = gw.dst_id or r.src = gw.src_id or r.dst = gw.src_id)
+    join public.entities s on s.id = r.src
+    join public.entities d on d.id = r.dst
+    where gw.depth < max_depth
+      and r.id != gw.relation_id
+      and not (r.src = any(gw.visited_entities) and r.dst = any(gw.visited_entities))
+      and (not active_only or r.valid_to is null or r.valid_to > timezone('utc'::text, now()))
+)
+select distinct
+    gw.depth,
+    gw.src_id,
+    gw.src_name,
+    gw.src_type,
+    gw.predicate,
+    gw.dst_id,
+    gw.dst_name,
+    gw.dst_type,
+    gw.relation_id,
+    gw.memory_id,
+    gw.valid_from,
+    gw.valid_to
+from graph_walk gw
+order by gw.depth asc;
+$$;
+
+-- 9.7 RPC: search_graph_rpc (Keyword / Trigram fuzzy seed -> Graph Expansion)
+create or replace function search_graph_rpc (
+    query_text text,
+    max_depth int default 1,
+    active_only boolean default true
+)
+returns table (
+    depth int,
+    src_id uuid,
+    src_name text,
+    src_type text,
+    predicate text,
+    dst_id uuid,
+    dst_name text,
+    dst_type text,
+    relation_id uuid,
+    memory_id uuid
+)
+language plpgsql
+as $$
+begin
+    return query
+    with matched_roots as (
+        select e.id
+        from public.entities e
+        where lower(e.name) = lower(trim(query_text))
+           or query_text = any(e.aliases)
+           or e.name ilike '%' || query_text || '%'
+           or similarity(e.name, query_text) > 0.3
+        limit 5
+    )
+    select distinct
+        t.depth,
+        t.src_id,
+        t.src_name,
+        t.src_type,
+        t.predicate,
+        t.dst_id,
+        t.dst_name,
+        t.dst_type,
+        t.relation_id,
+        t.memory_id
+    from matched_roots mr
+    cross join lateral traverse_knowledge_graph(mr.id, max_depth, active_only) t
+    order by t.depth asc;
+end;
+$$;
