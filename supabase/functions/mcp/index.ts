@@ -1412,33 +1412,51 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
           };
         }
 
-        let resolvedSrcId: string | null = null;
-        let resolvedDstId: string | null = null;
+        let resolvedSrcIds: string[] = [];
+        let resolvedDstIds: string[] = [];
 
         if (src) {
           if (isUuid(src)) {
-            resolvedSrcId = src;
+            resolvedSrcIds = [src.trim()];
           } else {
-            const { data: srcEnt } = await supabase.from("entities").select("id").ilike("name", src.trim()).limit(1).maybeSingle();
-            if (srcEnt) resolvedSrcId = srcEnt.id;
+            const { data: srcEnts } = await supabase.from("entities").select("id").ilike("name", src.trim());
+            if (srcEnts && srcEnts.length > 0) resolvedSrcIds = srcEnts.map((e: any) => e.id);
           }
         }
 
         if (dst) {
           if (isUuid(dst)) {
-            resolvedDstId = dst;
+            resolvedDstIds = [dst.trim()];
           } else {
-            const { data: dstEnt } = await supabase.from("entities").select("id").ilike("name", dst.trim()).limit(1).maybeSingle();
-            if (dstEnt) resolvedDstId = dstEnt.id;
+            const { data: dstEnts } = await supabase.from("entities").select("id").ilike("name", dst.trim());
+            if (dstEnts && dstEnts.length > 0) resolvedDstIds = dstEnts.map((e: any) => e.id);
           }
+        }
+
+        if (src && resolvedSrcIds.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ message: `Source entity '${src}' not found.`, count: 0 }, null, 2),
+            }],
+          };
+        }
+
+        if (dst && resolvedDstIds.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ message: `Destination entity '${dst}' not found.`, count: 0 }, null, 2),
+            }],
+          };
         }
 
         let relQuery = supabase.from("relations").select("id, src, dst, predicate, valid_from, valid_to");
         if (targetIds.length > 0) {
           relQuery = relQuery.in("id", targetIds);
         }
-        if (resolvedSrcId) relQuery = relQuery.eq("src", resolvedSrcId);
-        if (resolvedDstId) relQuery = relQuery.eq("dst", resolvedDstId);
+        if (resolvedSrcIds.length > 0) relQuery = relQuery.in("src", resolvedSrcIds);
+        if (resolvedDstIds.length > 0) relQuery = relQuery.in("dst", resolvedDstIds);
         if (predicate) relQuery = relQuery.eq("predicate", predicate.trim().toLowerCase());
         if (active_only) relQuery = relQuery.is("valid_to", null);
 
