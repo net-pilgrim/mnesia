@@ -17,6 +17,7 @@
 - ✅ **Zero-Overhead KG Extraction**: Calling agents populate entities & relations directly during `store_memory`
 - ✅ **SHA-256 Content Deduplication**: Reuses vector embeddings on duplicate text to conserve API quota
 - ✅ **Turnkey Multi-Agent Skill Store** (`public.skills`)
+- ✅ **Housekeeping & Garbage Collection**: Clear obsolete memories, superseded KG links, and orphaned entities with dry-run support
 - ✅ **Automated CI/CD** via GitHub Actions
 
 ---
@@ -199,6 +200,10 @@ flowchart LR
 | `search_graph` | `query`, `max_depth`, `active_only` | Explores the knowledge graph around matching entities up to N hops. |
 | `link_entities` | `src`, `dst`, `predicate`, `src_type`, `dst_type`, `memory_id`, `invalidate_previous`, `metadata` | Directly asserts a directed relationship between two entities. |
 | `list_memories` | `agent_id`, `session_id`, `category`, `limit` | Chronological paginated memory inspection. |
+| `clear_obsolete_data` | `clear_invalidated_relations`, `clear_orphaned_entities`, `clear_memories`, `obsolete_memories_only`, `older_than_days`, `session_id`, `category`, `dry_run` | Clears superseded KG links (`valid_to` in past), orphaned entities, and obsolete/expired memories with dry-run support. |
+| `delete_memory` | `id`, `ids`, `session_id`, `category`, `older_than_days`, `soft_delete`, `purge_orphaned_entities`, `dry_run` | Targeted memory deletion or soft-delete (marking obsolete) with entity cleanup. |
+| `delete_relation` | `id`, `ids`, `src`, `dst`, `predicate`, `active_only`, `invalidate_only`, `purge_orphaned_entities`, `dry_run` | Deletes or soft-invalidates specific graph relations by ID or endpoints. |
+| `update_memory` | `id`, `content`, `category`, `tags`, `metadata`, `is_obsolete` | Updates memory in place, optionally re-embedding or flagging as obsolete. |
 | `list_skills` | *(none)* | Discovers team operational runbooks and shared procedures. |
 | `get_skill` | `name` | Fetches step-by-step instructions for a published team skill. |
 | `publish_skill` | `name`, `description`, `instructions`, `tags`, `author_agent` | Publishes a novel procedure to Supabase for all agents to execute. |

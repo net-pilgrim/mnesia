@@ -21,6 +21,10 @@ Agent Action | Appropriate MCP Tool | Example Scope / Category
 **Discovering an environment/code fact** | `store_memory(content=..., category='fact', entities=[...], relations=[...])` | `fact`
 **Making a design/architecture choice** | `store_memory(content=..., category='decision', entities=[...], relations=[...])` | `decision`
 **Linking two known entities** | `link_entities(src=..., dst=..., predicate=...)` | Direct knowledge graph link
+**Clearing obsolete graph links & dead entities** | `clear_obsolete_data(...)` | Knowledge base maintenance
+**Deleting or deprecating memories** | `delete_memory(id=..., soft_delete=...)` | Targeted memory deletion
+**Removing or invalidating graph links** | `delete_relation(src=..., dst=..., predicate=...)` | Directed link removal
+**Updating or marking memory obsolete** | `update_memory(id=..., is_obsolete=True)` | In-place correction & obsolescence
 **Recording user constraints/instructions** | `store_memory(content=..., category='preference')` | `preference`
 **Finishing a task & preparing handover** | `store_memory(content=..., category='summary')` | `summary`
 **Learning a reusable procedural workflow** | `publish_skill(name=..., instructions=...)` | Runbook publication
@@ -105,6 +109,45 @@ publish_skill(
     tags=["database", "devops"],
     author_agent="devops_agent"
 )
+```
+
+### 5. Clearing Unused or Obsolete Memories & KG Links
+When systems evolve, architectural choices change, or tasks complete, prune outdated links and memories to maintain high retrieval quality:
+
+```python
+# 1. Preview pruning of superseded links & orphaned entities (safe dry run)
+preview = clear_obsolete_data(
+    clear_invalidated_relations=True,
+    clear_orphaned_entities=True,
+    dry_run=True
+)
+
+# 2. Purge superseded KG links and dead entity nodes (valid_to <= now)
+clear_obsolete_data(
+    clear_invalidated_relations=True,
+    clear_orphaned_entities=True
+)
+
+# 3. Prune obsolete memories from an old or temporary session
+clear_obsolete_data(
+    clear_memories=True,
+    session_id="temp_investigation_session",
+    obsolete_memories_only=False
+)
+
+# 4. Remove or invalidate a specific outdated knowledge graph link
+delete_relation(
+    src="ServiceAPI",
+    dst="LegacyAuthService",
+    predicate="depends_on",
+    invalidate_only=True # Soft-invalidate (sets valid_to=now) or False to hard-delete
+)
+
+# 5. Delete specific obsolete memories or mark them obsolete
+delete_memory(id="uuid-here", purge_orphaned_entities=True)
+
+# or mark in-place as obsolete for deferred pruning
+update_memory(id="uuid-here", is_obsolete=True)
 ```
 
 ---

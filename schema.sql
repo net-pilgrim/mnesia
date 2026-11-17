@@ -463,3 +463,128 @@ begin
     order by t.depth asc;
 end;
 $$;
+
+-- ==============================================================================
+-- 10. Graph & Memory Maintenance RPCs (Clearing Obsolete & Unused Knowledge)
+-- ==============================================================================
+
+-- 10.1 RPC: prune_orphaned_entities (Removes entities with zero active relations & zero memories)
+create or replace function prune_orphaned_entities (
+    dry_run boolean default false
+)
+returns table (
+    orphaned_count int,
+    orphaned_ids uuid[]
+)
+language plpgsql
+as $$
+declare
+    v_ids uuid[];
+    v_count int;
+begin
+    select array_agg(e.id) into v_ids
+    from public.entities e
+    where not exists (
+        select 1 from public.relations r
+        where r.src = e.id or r.dst = e.id
+    )
+    and not exists (
+        select 1 from public.memory_entities me
+        where me.entity_id = e.id
+    );
+
+    v_count := coalesce(array_length(v_ids, 1), 0);
+
+    if not dry_run and v_count > 0 then
+        delete from public.entities
+        where id = any(v_ids);
+    end if;
+
+    return query select v_count, coalesce(v_ids, array[]::uuid[]);
+end;
+$$;
+
+-- 10.2 RPC: prune_obsolete_knowledge (Bulk cleanup of invalidated links, obsolete memories & orphaned entities)
+create or replace function prune_obsolete_knowledge (
+    clear_invalidated_relations boolean default true,
+    clear_orphaned_entities boolean default true,
+    clear_memories boolean default false,
+    obsolete_memories_only boolean default true,
+    older_than_interval interval default null,
+    target_session_id text default null,
+    target_category text default null,
+    dry_run boolean default false
+)
+returns table (
+    cleared_relations_count int,
+    cleared_memories_count int,
+    cleared_entities_count int
+)
+language plpgsql
+as $$
+declare
+    rel_ids uuid[];
+    mem_ids uuid[];
+    ent_ids uuid[];
+    v_rel_count int := 0;
+    v_mem_count int := 0;
+    v_ent_count int := 0;
+begin
+    -- 1. Identify invalidated or expired relations
+    if clear_invalidated_relations then
+        select array_agg(r.id) into rel_ids
+        from public.relations r
+        where (r.valid_to is not null and r.valid_to <= timezone('utc'::text, now()))
+           or (older_than_interval is not null and r.created_at < timezone('utc'::text, now()) - older_than_interval);
+
+        v_rel_count := coalesce(array_length(rel_ids, 1), 0);
+        if not dry_run and v_rel_count > 0 then
+            delete from public.relations where id = any(rel_ids);
+        end if;
+    end if;
+
+    -- 2. Identify obsolete memories
+    if clear_memories then
+        select array_agg(m.id) into mem_ids
+        from public.memories m
+        where (
+            not obsolete_memories_only or (
+                coalesce((m.metadata->>'obsolete')::boolean, false) = true
+                or m.metadata->>'status' = 'obsolete'
+                or coalesce((m.metadata->>'deprecated')::boolean, false) = true
+                or coalesce((m.metadata->>'expired')::boolean, false) = true
+            )
+        )
+        and (older_than_interval is null or m.created_at < timezone('utc'::text, now()) - older_than_interval)
+        and (target_session_id is null or m.session_id = target_session_id)
+        and (target_category is null or m.category = target_category);
+
+        v_mem_count := coalesce(array_length(mem_ids, 1), 0);
+        if not dry_run and v_mem_count > 0 then
+            delete from public.memories where id = any(mem_ids);
+        end if;
+    end if;
+
+    -- 3. Identify orphaned entities (0 relations and 0 memories)
+    if clear_orphaned_entities then
+        select array_agg(e.id) into ent_ids
+        from public.entities e
+        where not exists (
+            select 1 from public.relations r
+            where r.src = e.id or r.dst = e.id
+        )
+        and not exists (
+            select 1 from public.memory_entities me
+            where me.entity_id = e.id
+        );
+
+        v_ent_count := coalesce(array_length(ent_ids, 1), 0);
+        if not dry_run and v_ent_count > 0 then
+            delete from public.entities where id = any(ent_ids);
+        end if;
+    end if;
+
+    return query select v_rel_count, v_mem_count, v_ent_count;
+end;
+$$;
+

@@ -190,6 +190,182 @@ const MCP_TOOLS = [
       required: ["name", "description", "instructions"],
     },
   },
+  {
+    name: "clear_obsolete_data",
+    description: "Clear obsolete or unused data: invalidated/superseded KG links (valid_to in past), orphaned entities (0 relations and 0 memories), and obsolete or expired memories",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clear_invalidated_relations: {
+          type: "boolean",
+          description: "Purge relations where valid_to is in the past (superseded/obsolete KG links)",
+          default: true,
+        },
+        clear_orphaned_entities: {
+          type: "boolean",
+          description: "Purge entities with no remaining relations (incoming/outgoing) and no grounded memories",
+          default: true,
+        },
+        clear_memories: {
+          type: "boolean",
+          description: "Whether to prune memories based on obsolete status, age, or scope filters",
+          default: false,
+        },
+        obsolete_memories_only: {
+          type: "boolean",
+          description: "When clear_memories is true, only delete memories explicitly flagged as obsolete in metadata (e.g. metadata.obsolete=true or metadata.status='obsolete')",
+          default: true,
+        },
+        older_than_days: {
+          type: "number",
+          description: "Optional age filter: purge records created older than N days ago",
+        },
+        session_id: {
+          type: "string",
+          description: "Optional session scope filter for memory clearing",
+        },
+        category: {
+          type: "string",
+          description: "Optional category filter for memory clearing",
+        },
+        dry_run: {
+          type: "boolean",
+          description: "If true, simulates the pruning and returns counts and sample records without deleting anything",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "delete_memory",
+    description: "Delete specific memories or memory batches by ID, session, category, or age, with optional soft-delete and orphaned entity pruning",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "UUID of a single memory to delete",
+        },
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Array of memory UUIDs to delete",
+        },
+        session_id: {
+          type: "string",
+          description: "Delete all memories matching this session ID",
+        },
+        category: {
+          type: "string",
+          description: "Delete all memories matching this category",
+        },
+        older_than_days: {
+          type: "number",
+          description: "Delete memories created older than N days ago",
+        },
+        soft_delete: {
+          type: "boolean",
+          description: "If true, flags memories as obsolete in metadata instead of hard-deleting",
+          default: false,
+        },
+        purge_orphaned_entities: {
+          type: "boolean",
+          description: "Purge entities that are left with 0 relations and 0 grounded memories after this deletion",
+          default: true,
+        },
+        dry_run: {
+          type: "boolean",
+          description: "If true, returns what would be deleted without executing the deletion",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "delete_relation",
+    description: "Delete or invalidate specific knowledge graph relations/links by ID or src/dst/predicate, with optional orphaned entity pruning",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "UUID of a single relation to delete",
+        },
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Array of relation UUIDs to delete",
+        },
+        src: {
+          type: "string",
+          description: "Source entity name or UUID",
+        },
+        dst: {
+          type: "string",
+          description: "Destination entity name or UUID",
+        },
+        predicate: {
+          type: "string",
+          description: "Relation predicate (e.g. 'depends_on', 'uses')",
+        },
+        active_only: {
+          type: "boolean",
+          description: "If true and matching by src/dst/predicate, only delete active relations (valid_to is null)",
+          default: false,
+        },
+        invalidate_only: {
+          type: "boolean",
+          description: "If true, soft-invalidates matching relations by setting valid_to=now() instead of hard-deleting",
+          default: false,
+        },
+        purge_orphaned_entities: {
+          type: "boolean",
+          description: "Purge entities that are left with 0 relations and 0 grounded memories after this deletion",
+          default: true,
+        },
+        dry_run: {
+          type: "boolean",
+          description: "If true, returns what would be deleted without executing the deletion",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "update_memory",
+    description: "Update an existing memory's content, category, tags, or metadata (such as marking it obsolete)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: {
+          type: "string",
+          description: "UUID of the memory to update",
+        },
+        content: {
+          type: "string",
+          description: "New content for the memory (will regenerate embedding and content_hash)",
+        },
+        category: {
+          type: "string",
+          description: "New category for the memory",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Updated tags array",
+        },
+        metadata: {
+          type: "object",
+          description: "Metadata object to merge into existing metadata",
+        },
+        is_obsolete: {
+          type: "boolean",
+          description: "Convenience flag to mark this memory as obsolete in its metadata",
+        },
+      },
+      required: ["id"],
+    },
+  },
 ];
 
 /**
@@ -447,6 +623,76 @@ async function linkEntitiesHelper(
     src_name: srcEntity.name,
     dst_name: dstEntity.name,
   };
+}
+
+/**
+ * UUID validator helper
+ */
+function isUuid(str: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str.trim());
+}
+
+/**
+ * Purge entities that have 0 relations (incoming/outgoing) and 0 grounded memories
+ */
+async function purgeOrphanedEntities(
+  supabase: SupabaseClient,
+  dryRun = false
+): Promise<{ count: number; entities: any[] }> {
+  // 1. Try PostgreSQL RPC prune_orphaned_entities if available
+  try {
+    const { data: rpcRows, error: rpcErr } = await supabase.rpc("prune_orphaned_entities", {
+      dry_run: dryRun,
+    });
+    if (!rpcErr && Array.isArray(rpcRows) && rpcRows.length > 0) {
+      const row = rpcRows[0];
+      return {
+        count: row.orphaned_count || 0,
+        entities: (row.orphaned_ids || []).map((id: string) => ({ id })),
+      };
+    }
+  } catch (_) {
+    // Fall back to direct table checks
+  }
+
+  // Fallback: collect all referenced entity IDs across relations and memory_entities
+  const { data: rels } = await supabase.from("relations").select("src, dst");
+  const { data: memEnts } = await supabase.from("memory_entities").select("entity_id");
+
+  const referencedIds = new Set<string>();
+  if (rels) {
+    for (const r of rels) {
+      if (r.src) referencedIds.add(r.src);
+      if (r.dst) referencedIds.add(r.dst);
+    }
+  }
+  if (memEnts) {
+    for (const me of memEnts) {
+      if (me.entity_id) referencedIds.add(me.entity_id);
+    }
+  }
+
+  const { data: allEntities } = await supabase.from("entities").select("id, name, type");
+  if (!allEntities || allEntities.length === 0) {
+    return { count: 0, entities: [] };
+  }
+
+  const orphaned = allEntities.filter((e) => !referencedIds.has(e.id));
+  if (orphaned.length === 0) {
+    return { count: 0, entities: [] };
+  }
+
+  if (dryRun) {
+    return { count: orphaned.length, entities: orphaned };
+  }
+
+  const orphanedIds = orphaned.map((e) => e.id);
+  for (let i = 0; i < orphanedIds.length; i += 100) {
+    const chunk = orphanedIds.slice(i, i + 100);
+    await supabase.from("entities").delete().in("id", chunk);
+  }
+
+  return { count: orphaned.length, entities: orphaned };
 }
 
 /**
@@ -879,6 +1125,486 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
         }).select().single();
         if (error) return { isError: true, content: [{ type: "text", text: `Error: ${error.message}` }] };
         return { content: [{ type: "text", text: JSON.stringify({ success: true, skill: data }, null, 2) }] };
+      }
+
+      case "clear_obsolete_data": {
+        const {
+          clear_invalidated_relations = true,
+          clear_orphaned_entities = true,
+          clear_memories = false,
+          obsolete_memories_only = true,
+          older_than_days,
+          session_id,
+          category,
+          dry_run = false,
+        } = args;
+
+        const nowIso = new Date().toISOString();
+        let clearedRelationsCount = 0;
+        let clearedRelationsDetails: any[] = [];
+        let clearedMemoriesCount = 0;
+        let clearedMemoriesDetails: any[] = [];
+        let clearedEntitiesCount = 0;
+        let clearedEntitiesDetails: any[] = [];
+
+        // 1. Try PostgreSQL RPC prune_obsolete_knowledge if available
+        let rpcExecuted = false;
+        try {
+          const olderThanInterval = older_than_days ? `${older_than_days} days` : null;
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc("prune_obsolete_knowledge", {
+            clear_invalidated_relations,
+            clear_orphaned_entities,
+            clear_memories,
+            obsolete_memories_only,
+            older_than_interval: olderThanInterval,
+            target_session_id: session_id || null,
+            target_category: category || null,
+            dry_run,
+          });
+
+          if (!rpcErr && Array.isArray(rpcRes) && rpcRes.length > 0) {
+            const row = rpcRes[0];
+            clearedRelationsCount = row.cleared_relations_count || 0;
+            clearedMemoriesCount = row.cleared_memories_count || 0;
+            clearedEntitiesCount = row.cleared_entities_count || 0;
+            rpcExecuted = true;
+          }
+        } catch (_) {
+          // Fall back to direct client operations
+        }
+
+        if (!rpcExecuted) {
+          // Fallback Step 1: Clear Invalidated / Superseded Relations
+          if (clear_invalidated_relations) {
+            let relQuery = supabase.from("relations").select("id, src, dst, predicate, valid_from, valid_to");
+            relQuery = relQuery.not("valid_to", "is", null).lte("valid_to", nowIso);
+            const { data: staleRels, error: relErr } = await relQuery;
+            if (!relErr && staleRels && staleRels.length > 0) {
+              clearedRelationsCount = staleRels.length;
+              clearedRelationsDetails = staleRels;
+              if (!dry_run) {
+                const ids = staleRels.map((r: any) => r.id);
+                for (let i = 0; i < ids.length; i += 100) {
+                  await supabase.from("relations").delete().in("id", ids.slice(i, i + 100));
+                }
+              }
+            }
+          }
+
+          // Fallback Step 2: Clear Obsolete Memories
+          if (clear_memories) {
+            let memQuery = supabase.from("memories").select("id, category, session_id, created_at, metadata");
+            if (older_than_days) {
+              const cutoff = new Date(Date.now() - older_than_days * 86400000).toISOString();
+              memQuery = memQuery.lt("created_at", cutoff);
+            }
+            if (session_id) memQuery = memQuery.eq("session_id", session_id);
+            if (category) memQuery = memQuery.eq("category", category);
+
+            const { data: candidateMems, error: memErr } = await memQuery;
+            if (!memErr && candidateMems) {
+              const matchingMems = candidateMems.filter((m: any) => {
+                if (!obsolete_memories_only) return true;
+                const meta = m.metadata || {};
+                return meta.obsolete === true || meta.status === "obsolete" || meta.deprecated === true || meta.expired === true;
+              });
+
+              if (matchingMems.length > 0) {
+                clearedMemoriesCount = matchingMems.length;
+                clearedMemoriesDetails = matchingMems.map((m: any) => ({
+                  id: m.id,
+                  category: m.category,
+                  session_id: m.session_id,
+                  created_at: m.created_at,
+                }));
+
+                if (!dry_run) {
+                  const mIds = matchingMems.map((m: any) => m.id);
+                  for (let i = 0; i < mIds.length; i += 100) {
+                    await supabase.from("memories").delete().in("id", mIds.slice(i, i + 100));
+                  }
+                }
+              }
+            }
+          }
+
+          // Fallback Step 3: Clear Orphaned Entities
+          if (clear_orphaned_entities) {
+            const orphanResult = await purgeOrphanedEntities(supabase, dry_run);
+            clearedEntitiesCount = orphanResult.count;
+            clearedEntitiesDetails = orphanResult.entities;
+          }
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              dry_run,
+              cleared_invalidated_relations_count: clearedRelationsCount,
+              cleared_memories_count: clearedMemoriesCount,
+              cleared_orphaned_entities_count: clearedEntitiesCount,
+              ...(dry_run ? {
+                details: {
+                  relations: clearedRelationsDetails,
+                  memories: clearedMemoriesDetails,
+                  entities: clearedEntitiesDetails,
+                },
+              } : {}),
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "delete_memory": {
+        const {
+          id: memId,
+          ids: memIds,
+          session_id,
+          category,
+          older_than_days,
+          soft_delete = false,
+          purge_orphaned_entities: doPurgeEntities = true,
+          dry_run = false,
+        } = args;
+
+        const targetIds: string[] = [];
+        if (memId && typeof memId === "string") targetIds.push(memId.trim());
+        if (Array.isArray(memIds)) {
+          for (const item of memIds) {
+            if (typeof item === "string" && item.trim()) targetIds.push(item.trim());
+          }
+        }
+
+        if (targetIds.length === 0 && !session_id && !category && !older_than_days) {
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: "Must provide at least one filter criterion: 'id', 'ids', 'session_id', 'category', or 'older_than_days'.",
+            }],
+          };
+        }
+
+        let query = supabase.from("memories").select("id, session_id, category, created_at, metadata");
+        if (targetIds.length > 0) {
+          query = query.in("id", targetIds);
+        }
+        if (session_id) query = query.eq("session_id", session_id);
+        if (category) query = query.eq("category", category);
+        if (older_than_days) {
+          const cutoff = new Date(Date.now() - older_than_days * 86400000).toISOString();
+          query = query.lt("created_at", cutoff);
+        }
+
+        const { data: matches, error: fetchErr } = await query;
+        if (fetchErr) {
+          return { isError: true, content: [{ type: "text", text: `Fetch error: ${fetchErr.message}` }] };
+        }
+
+        const matchedMems = matches || [];
+        if (matchedMems.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ message: "No memories matched the specified criteria.", count: 0 }, null, 2),
+            }],
+          };
+        }
+
+        const matchedIds = matchedMems.map((m: any) => m.id);
+
+        if (dry_run) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                matched_count: matchedIds.length,
+                matched_ids: matchedIds,
+                memories: matchedMems,
+              }, null, 2),
+            }],
+          };
+        }
+
+        if (soft_delete) {
+          const nowIso = new Date().toISOString();
+          for (const m of matchedMems) {
+            const meta = m.metadata || {};
+            await supabase
+              .from("memories")
+              .update({
+                metadata: { ...meta, obsolete: true, obsoleted_at: nowIso },
+              })
+              .eq("id", m.id);
+          }
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                soft_deleted_count: matchedIds.length,
+                soft_deleted_ids: matchedIds,
+                note: "Memories flagged as obsolete in metadata. Use clear_obsolete_data to permanently purge.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        // Hard delete
+        for (let i = 0; i < matchedIds.length; i += 100) {
+          const chunk = matchedIds.slice(i, i + 100);
+          const { error: delErr } = await supabase.from("memories").delete().in("id", chunk);
+          if (delErr) {
+            return { isError: true, content: [{ type: "text", text: `Delete error: ${delErr.message}` }] };
+          }
+        }
+
+        let purgedEntitiesCount = 0;
+        if (doPurgeEntities) {
+          const orphanResult = await purgeOrphanedEntities(supabase, false);
+          purgedEntitiesCount = orphanResult.count;
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              deleted_memories_count: matchedIds.length,
+              deleted_memory_ids: matchedIds,
+              purged_orphaned_entities_count: purgedEntitiesCount,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "delete_relation": {
+        const {
+          id: relId,
+          ids: relIds,
+          src,
+          dst,
+          predicate,
+          active_only = false,
+          invalidate_only = false,
+          purge_orphaned_entities: doPurgeEntities = true,
+          dry_run = false,
+        } = args;
+
+        const targetIds: string[] = [];
+        if (relId && typeof relId === "string") targetIds.push(relId.trim());
+        if (Array.isArray(relIds)) {
+          for (const item of relIds) {
+            if (typeof item === "string" && item.trim()) targetIds.push(item.trim());
+          }
+        }
+
+        if (targetIds.length === 0 && !src && !dst) {
+          return {
+            isError: true,
+            content: [{
+              type: "text",
+              text: "Must provide at least 'id', 'ids', or 'src'/'dst' to identify relations to delete.",
+            }],
+          };
+        }
+
+        let resolvedSrcId: string | null = null;
+        let resolvedDstId: string | null = null;
+
+        if (src) {
+          if (isUuid(src)) {
+            resolvedSrcId = src;
+          } else {
+            const { data: srcEnt } = await supabase.from("entities").select("id").ilike("name", src.trim()).limit(1).maybeSingle();
+            if (srcEnt) resolvedSrcId = srcEnt.id;
+          }
+        }
+
+        if (dst) {
+          if (isUuid(dst)) {
+            resolvedDstId = dst;
+          } else {
+            const { data: dstEnt } = await supabase.from("entities").select("id").ilike("name", dst.trim()).limit(1).maybeSingle();
+            if (dstEnt) resolvedDstId = dstEnt.id;
+          }
+        }
+
+        let relQuery = supabase.from("relations").select("id, src, dst, predicate, valid_from, valid_to");
+        if (targetIds.length > 0) {
+          relQuery = relQuery.in("id", targetIds);
+        }
+        if (resolvedSrcId) relQuery = relQuery.eq("src", resolvedSrcId);
+        if (resolvedDstId) relQuery = relQuery.eq("dst", resolvedDstId);
+        if (predicate) relQuery = relQuery.eq("predicate", predicate.trim().toLowerCase());
+        if (active_only) relQuery = relQuery.is("valid_to", null);
+
+        const { data: matchedRelations, error: matchErr } = await relQuery;
+        if (matchErr) {
+          return { isError: true, content: [{ type: "text", text: `Query error: ${matchErr.message}` }] };
+        }
+
+        const matchedRels = matchedRelations || [];
+        if (matchedRels.length === 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ message: "No relations matched the specified criteria.", count: 0 }, null, 2),
+            }],
+          };
+        }
+
+        const matchedRelationIds = matchedRels.map((r: any) => r.id);
+
+        if (dry_run) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                dry_run: true,
+                matched_count: matchedRelationIds.length,
+                matched_ids: matchedRelationIds,
+                relations: matchedRels,
+              }, null, 2),
+            }],
+          };
+        }
+
+        if (invalidate_only) {
+          const nowIso = new Date().toISOString();
+          const { error: invErr } = await supabase
+            .from("relations")
+            .update({ valid_to: nowIso })
+            .in("id", matchedRelationIds)
+            .is("valid_to", null);
+
+          if (invErr) {
+            return { isError: true, content: [{ type: "text", text: `Invalidate error: ${invErr.message}` }] };
+          }
+
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                invalidated_relations_count: matchedRelationIds.length,
+                invalidated_relation_ids: matchedRelationIds,
+                note: "Relations marked as superseded/invalidated (valid_to set). Use clear_obsolete_data to permanently purge.",
+              }, null, 2),
+            }],
+          };
+        }
+
+        // Hard delete relations
+        for (let i = 0; i < matchedRelationIds.length; i += 100) {
+          const chunk = matchedRelationIds.slice(i, i + 100);
+          const { error: delErr } = await supabase.from("relations").delete().in("id", chunk);
+          if (delErr) {
+            return { isError: true, content: [{ type: "text", text: `Delete error: ${delErr.message}` }] };
+          }
+        }
+
+        let purgedEntitiesCount = 0;
+        if (doPurgeEntities) {
+          const orphanResult = await purgeOrphanedEntities(supabase, false);
+          purgedEntitiesCount = orphanResult.count;
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              deleted_relations_count: matchedRelationIds.length,
+              deleted_relation_ids: matchedRelationIds,
+              purged_orphaned_entities_count: purgedEntitiesCount,
+            }, null, 2),
+          }],
+        };
+      }
+
+      case "update_memory": {
+        const { id: memId, content, category, tags, metadata, is_obsolete } = args;
+        if (!memId) {
+          return { isError: true, content: [{ type: "text", text: "Argument 'id' is required." }] };
+        }
+
+        const { data: existing, error: getErr } = await supabase
+          .from("memories")
+          .select("*")
+          .eq("id", memId)
+          .single();
+
+        if (getErr || !existing) {
+          return { isError: true, content: [{ type: "text", text: `Memory with id '${memId}' not found.` }] };
+        }
+
+        const updates: any = {};
+        if (category !== undefined) updates.category = category;
+        if (Array.isArray(tags)) updates.tags = tags;
+
+        let mergedMetadata = { ...(existing.metadata || {}) };
+        if (metadata && typeof metadata === "object") {
+          mergedMetadata = { ...mergedMetadata, ...metadata };
+        }
+        if (is_obsolete !== undefined) {
+          mergedMetadata.obsolete = Boolean(is_obsolete);
+          if (is_obsolete) {
+            mergedMetadata.obsoleted_at = new Date().toISOString();
+          } else {
+            delete mergedMetadata.obsoleted_at;
+          }
+        }
+        updates.metadata = mergedMetadata;
+
+        if (content && typeof content === "string" && content.trim() !== existing.content) {
+          updates.content = content.trim();
+          const contentHash = await sha256Hex(updates.content);
+          updates.content_hash = contentHash;
+
+          let embeddingVector: number[] | null = null;
+          try {
+            const { data: cached } = await supabase
+              .from("memories")
+              .select("embedding")
+              .eq("content_hash", contentHash)
+              .not("embedding", "is", null)
+              .limit(1)
+              .maybeSingle();
+
+            if (cached?.embedding) {
+              embeddingVector = cached.embedding;
+            }
+          } catch (_) {}
+
+          if (!embeddingVector) {
+            embeddingVector = await generateEmbedding(updates.content);
+          }
+          if (embeddingVector) {
+            updates.embedding = embeddingVector;
+          }
+        }
+
+        const { data: updated, error: updateErr } = await supabase
+          .from("memories")
+          .update(updates)
+          .eq("id", memId)
+          .select()
+          .single();
+
+        if (updateErr) {
+          return { isError: true, content: [{ type: "text", text: `Update error: ${updateErr.message}` }] };
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({ success: true, memory: updated }, null, 2),
+          }],
+        };
       }
 
       default:
