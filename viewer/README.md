@@ -1,0 +1,59 @@
+# Mnesia Knowledge Graph Visualizer & Explorer
+
+An interactive, zero-dependency graphical browser for multi-agent knowledge graphs and grounded memories.
+
+![Mnesia Knowledge Graph Viewer](data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🕸️</text></svg>)
+
+## 🚀 Quick Start
+
+### Option 1: Run the Local Proxy & Viewer Tool
+The local tool automatically auto-discovers your Supabase credentials (from `~/.gemini/config/mcp_config.json`, `.env`, or CLI arguments), fetches the graph JSON representation, and displays the interactive UI:
+
+```bash
+# Start local viewer & proxy on port 8080 (default)
+python3 viewer/serve.py 8080
+
+# Output graph JSON representation directly to stdout
+python3 viewer/serve.py --json
+
+# Save graph JSON representation to a file
+python3 viewer/serve.py --dump graph.json
+
+# Test connection and view statistics
+python3 viewer/serve.py --test
+```
+Then navigate to [http://localhost:8080](http://localhost:8080).
+
+### Option 2: Access via Supabase Edge Function
+The Edge Function generates the graph JSON and graphical viewer directly:
+
+- **JSON Endpoint**: `GET https://<project-ref>.supabase.co/functions/v1/mcp/graph.json`
+- **MCP Tool**: Call `get_knowledge_graph` via MCP
+- **Web UI**: `GET https://<project-ref>.supabase.co/functions/v1/mcp/viewer?apikey=<your-key>`
+
+---
+
+## 🎨 Key Features
+
+- **Interactive Force-Directed & DAG Layouts**:
+  - Physics-based organic graph visualization powered by Vis Network.
+  - Toggle between dynamic force-directed physics and hierarchical directed acyclic graph (DAG) mode.
+  - Physics stabilization and freeze/unfreeze controls.
+- **Entity Type Color Theming**:
+  - Distinct colors and badges for `concept`, `component`, `technology`, `decision`, `agent`, `system`, and `tool`.
+- **Temporal Validity & Relation Tracking**:
+  - Directed edges labeled with predicates (`uses`, `depends_on`, `protects`, `implements`, `replaces`).
+  - Visual distinction between **Active** relations (solid vibrant edges) and **Superseded** relations (dashed red/muted lines with `valid_to` timestamps).
+- **Search & Auto-Focus**:
+  - Real-time fuzzy autocomplete search over entity names, types, and aliases.
+  - Selecting any search result flies the camera to the node with spring animation and opens its inspector.
+- **1-Hop / 2-Hop Neighborhood Isolation**:
+  - Double-click any node (or click "Focus 1-Hop" in the inspector) to isolate its immediate neighborhood.
+- **Slide-Out Inspector Drawer**:
+  - **Entity Details**: Type badge, aliases, degree count, and raw metadata.
+  - **Relations Explorer**: Lists all incoming and outgoing relations with clickable neighbor links.
+  - **Grounded Memories**: Displays all memories linked to the entity (author agent, category, tags, created timestamp, full content snippet).
+- **Offline Demo Dataset**:
+  - Comes with a realistic pre-loaded multi-agent software architecture graph so you can test the viewer immediately without needing database credentials.
+- **Exporting**:
+  - Export the graph view as a high-resolution PNG screenshot with 1 click.

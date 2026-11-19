@@ -17,6 +17,7 @@
 - ✅ **Zero-Overhead KG Extraction**: Calling agents populate entities & relations directly during `store_memory`
 - ✅ **SHA-256 Content Deduplication**: Reuses vector embeddings on duplicate text to conserve API quota
 - ✅ **Turnkey Multi-Agent Skill Store** (`public.skills`)
+- ✅ **Graphical Knowledge Graph Visualizer & Explorer**: Interactive force-directed & DAG viewer with active/superseded link tracking and grounded memory inspection
 - ✅ **Housekeeping & Garbage Collection**: Clear obsolete memories, superseded KG links, and orphaned entities with dry-run support
 - ✅ **Automated CI/CD** via GitHub Actions
 
@@ -135,6 +136,40 @@ erDiagram
         timestamptz created_at
     }
 ```
+
+---
+
+## 🌐 Interactive Knowledge Graph Visualizer & Explorer
+
+Mnesia includes a modern, zero-dependency, standalone graphical browser for visualizing and exploring entities, relations, and grounded memories:
+
+- 🎮 **Force-Directed & Hierarchical (DAG) Physics**: Pan, zoom, drag nodes, and toggle between organic clustering or tree layouts.
+- 🎨 **Type-Aware Color Theming**: Visual color codes for `component`, `technology`, `concept`, `decision`, `agent`, `system`, and `tool`.
+- ⏳ **Temporal Relation Awareness**: Visual distinction between **Active** relations (solid edges) and **Superseded** relations (dashed red edges with `valid_to` timestamps).
+- 🔍 **Instant Search & Auto-Focus**: Type-ahead search across entities, types, and aliases with spring-camera focus.
+- 🎯 **1-Hop Neighborhood Isolation**: Double-click any node to isolate its connected neighborhood.
+- 📋 **Inspector Drawer**: Click any node or edge to inspect full metadata, incoming/outgoing edges, and grounded agent memories.
+- ⚡ **Built-in Demo Dataset**: Explore a pre-loaded multi-agent architecture graph immediately without database credentials.
+
+### How to Launch
+
+#### Option 1: Local Tool with Auto-Proxying
+The local tool auto-detects your credentials from `~/.gemini/config/mcp_config.json` or `.env` and proxies the graph JSON to the web viewer:
+```bash
+# Launch interactive viewer & local proxy
+python3 viewer/serve.py 8080
+
+# Or export/dump the JSON graph representation
+python3 viewer/serve.py --json
+python3 viewer/serve.py --dump graph.json
+```
+Then navigate to `http://localhost:8080`.
+
+#### Option 2: Live Edge Function Endpoints
+The Edge Function generates the graph JSON representation directly:
+- **JSON Graph API**: `GET https://<your-project-ref>.supabase.co/functions/v1/mcp/graph.json`
+- **MCP Tool**: `get_knowledge_graph(active_only=false, limit_entities=1000)`
+- **Web UI**: `GET https://<your-project-ref>.supabase.co/functions/v1/mcp/viewer?apikey=<your-supabase-key>`
 
 ---
 

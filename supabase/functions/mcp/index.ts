@@ -4,6 +4,7 @@
 // Features: Dual Vector/Text Retrieval + Knowledge Graph Grounding & Multi-Hop Traversal
 
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@^2.49.1";
+import { getViewerHtml } from "./viewer_html.ts";
 
 interface Session {
   send: (data: any) => void;
@@ -364,6 +365,25 @@ const MCP_TOOLS = [
         },
       },
       required: ["id"],
+    },
+  },
+  {
+    name: "get_knowledge_graph",
+    description: "Export the full Knowledge Graph representation (entities, relations, grounded memories, and graph stats) as structured JSON",
+    inputSchema: {
+      type: "object",
+      properties: {
+        active_only: {
+          type: "boolean",
+          description: "If true, only returns active relations (valid_to is null)",
+          default: false,
+        },
+        limit_entities: {
+          type: "number",
+          description: "Max entities to return",
+          default: 1000,
+        },
+      },
     },
   },
 ];
@@ -1625,6 +1645,46 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
         };
       }
 
+      case "get_knowledge_graph": {
+        const { active_only = false, limit_entities = 1000 } = args;
+        const [entitiesRes, relationsRes, memoriesRes, memoryEntitiesRes] = await Promise.all([
+          supabase.from("entities").select("id, name, type, aliases, metadata, created_at, updated_at").order("name").limit(limit_entities),
+          active_only
+            ? supabase.from("relations").select("id, src, dst, predicate, memory_id, valid_from, valid_to, metadata, created_at").is("valid_to", null).order("created_at")
+            : supabase.from("relations").select("id, src, dst, predicate, memory_id, valid_from, valid_to, metadata, created_at").order("created_at"),
+          supabase.from("memories").select("id, agent_id, session_id, category, content, tags, metadata, created_at").order("created_at", { ascending: false }).limit(300),
+          supabase.from("memory_entities").select("memory_id, entity_id"),
+        ]);
+
+        const entities = entitiesRes.data || [];
+        const relations = relationsRes.data || [];
+        const memories = memoriesRes.data || [];
+        const memoryEntities = memoryEntitiesRes.data || [];
+
+        const stats = {
+          entity_count: entities.length,
+          relation_count: relations.length,
+          active_relations: relations.filter((r: any) => !r.valid_to).length,
+          superseded_relations: relations.filter((r: any) => !!r.valid_to).length,
+          memory_count: memories.length,
+        };
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              status: "ok",
+              generated_at: new Date().toISOString(),
+              stats,
+              entities,
+              relations,
+              memories,
+              memory_entities: memoryEntities,
+            }, null, 2),
+          }],
+        };
+      }
+
       default:
         return { isError: true, content: [{ type: "text", text: `Unknown tool: ${name}` }] };
     }
@@ -1714,6 +1774,91 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY")!;
   const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // 0. Graphical Knowledge Graph Viewer & Graph JSON API
+  if (
+    req.method === "GET" &&
+    (pathname.endsWith("/viewer") ||
+      pathname.endsWith("/graph") ||
+      pathname.endsWith("/graph.json") ||
+      (pathname.endsWith("/mcp") && req.headers.get("accept")?.includes("text/html")))
+  ) {
+    const isJson =
+      pathname.endsWith("/graph.json") ||
+      url.searchParams.get("format") === "json" ||
+      (pathname.endsWith("/graph") && !req.headers.get("accept")?.includes("text/html"));
+
+    if (isJson) {
+      const activeOnly = url.searchParams.get("active_only") === "true";
+      const limit = parseInt(url.searchParams.get("limit") || "1000", 10);
+
+      const [entitiesRes, relationsRes, memoriesRes, memoryEntitiesRes] = await Promise.all([
+        supabase
+          .from("entities")
+          .select("id, name, type, aliases, metadata, created_at, updated_at")
+          .order("name")
+          .limit(limit),
+        activeOnly
+          ? supabase
+              .from("relations")
+              .select("id, src, dst, predicate, memory_id, valid_from, valid_to, metadata, created_at")
+              .is("valid_to", null)
+              .order("created_at")
+          : supabase
+              .from("relations")
+              .select("id, src, dst, predicate, memory_id, valid_from, valid_to, metadata, created_at")
+              .order("created_at"),
+        supabase
+          .from("memories")
+          .select("id, agent_id, session_id, category, content, tags, metadata, created_at")
+          .order("created_at", { ascending: false })
+          .limit(300),
+        supabase.from("memory_entities").select("memory_id, entity_id"),
+      ]);
+
+      const entities = entitiesRes.data || [];
+      const relations = relationsRes.data || [];
+      const memories = memoriesRes.data || [];
+      const memoryEntities = memoryEntitiesRes.data || [];
+
+      const stats = {
+        entity_count: entities.length,
+        relation_count: relations.length,
+        active_relations: relations.filter((r: any) => !r.valid_to).length,
+        superseded_relations: relations.filter((r: any) => !!r.valid_to).length,
+        memory_count: memories.length,
+      };
+
+      return new Response(
+        JSON.stringify({
+          status: "ok",
+          generated_at: new Date().toISOString(),
+          stats,
+          entities,
+          relations,
+          memories,
+          memory_entities: memoryEntities,
+        }),
+        {
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "public, max-age=10",
+          },
+        }
+      );
+    }
+
+    const queryKey = url.searchParams.get("apikey") || url.searchParams.get("token") || url.searchParams.get("key") || "";
+    const html = getViewerHtml(supabaseUrl, queryKey);
+    return new Response(html, {
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "public, max-age=300",
+      },
+    });
+  }
 
   // Healthcheck endpoint
   if (req.method === "GET" && (pathname.endsWith("/health") || pathname === "/functions/v1/mcp")) {
