@@ -39,8 +39,15 @@ The Edge Function generates the graph JSON and graphical viewer directly:
   - Physics-based organic graph visualization powered by Vis Network.
   - Toggle between dynamic force-directed physics and hierarchical directed acyclic graph (DAG) mode.
   - Physics stabilization and freeze/unfreeze controls.
-- **Entity Type Color Theming**:
+- **Drag-to-Connect Interactive Relation Creation**:
+  - Drag any node onto another node to instantly create a directed **`connected_to`** relation.
+  - Real-time drop-target snapping indicator with target name preview.
+  - Non-blocking action toast with instant **`Undo`** support.
+  - Automatically promotes and grounds unlinked gray memory nodes into active connected entities when dragged onto entities.
+  - Persists directly to Supabase (`public.relations`) via local proxy or PostgREST.
+- **Entity Type Color Theming & Gray Memory Nodes**:
   - Distinct colors and badges for `concept`, `component`, `technology`, `decision`, `agent`, `system`, and `tool`.
+  - **Gray Nodes for Unlinked Memories**: Memories stored in the database that are not yet grounded into KG entities or relations appear as distinct **gray nodes** (`memory` type). Clicking them opens the inspector drawer showing their full Markdown content and grounding guidelines.
 - **Temporal Validity & Relation Tracking**:
   - Directed edges labeled with predicates (`uses`, `depends_on`, `protects`, `implements`, `replaces`).
   - Visual distinction between **Active** relations (solid vibrant edges) and **Superseded** relations (dashed red/muted lines with `valid_to` timestamps).

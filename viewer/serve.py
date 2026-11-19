@@ -18,6 +18,7 @@ import os
 import re
 import socketserver
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -136,12 +137,20 @@ def fetch_graph_from_edge_or_db(supabase_url, supabase_key):
         except Exception:
             memory_entities = []
 
+        linked_mems = set(me.get("memory_id") for me in memory_entities if me.get("memory_id"))
+        for r in relations:
+            if r.get("memory_id"):
+                linked_mems.add(r.get("memory_id"))
+        unlinked_count = len([m for m in memories if m.get("id") not in linked_mems])
+
         stats = {
             "entity_count": len(entities),
             "relation_count": len(relations),
             "active_relations": len([r for r in relations if not r.get("valid_to")]),
             "superseded_relations": len([r for r in relations if r.get("valid_to")]),
-            "memory_count": len(memories)
+            "memory_count": len(memories),
+            "grounded_memory_count": len(memories) - unlinked_count,
+            "unlinked_memory_count": unlinked_count
         }
 
         return {
@@ -211,7 +220,7 @@ class KnowledgeGraphProxyHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
@@ -220,9 +229,84 @@ class KnowledgeGraphProxyHandler(http.server.SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path in ("/api/relations", "/api/entities", "/api/memory_entities"):
+            length = int(self.headers.get("Content-Length", 0))
+            body_bytes = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                payload = json.loads(body_bytes.decode("utf-8"))
+            except Exception as e:
+                self.send_json_response(400, {"error": f"Invalid JSON: {e}"})
+                return
+
+            table = path.replace("/api/", "")
+            if not (self.supabase_url and self.supabase_key):
+                fake_id = payload.get("id") or f"demo_{table}_{int(time.time() * 1000)}"
+                result = {**payload, "id": fake_id, "created_at": "2026-11-19T21:45:00Z"}
+                self.send_json_response(201, {"status": "ok", "demo": True, "data": result})
+                return
+
+            rest_url = f"{self.supabase_url}/rest/v1/{table}"
+            headers = {
+                "apikey": self.supabase_key,
+                "Authorization": f"Bearer {self.supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=representation"
+            }
+            req = urllib.request.Request(rest_url, data=body_bytes, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    item = resp_data[0] if isinstance(resp_data, list) and resp_data else resp_data
+                    KnowledgeGraphProxyHandler.cached_graph = None
+                    self.send_json_response(201, {"status": "ok", "data": item})
+            except urllib.error.HTTPError as e:
+                err_text = e.read().decode("utf-8")
+                self.send_json_response(e.code, {"error": err_text})
+            except Exception as e:
+                self.send_json_response(500, {"error": str(e)})
+            return
+
+        self.send_json_response(404, {"error": "Not found"})
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path in ("/api/relations", "/api/entities"):
+            table = path.replace("/api/", "")
+            qs = urllib.parse.parse_qs(parsed.query)
+            item_id = qs.get("id", [None])[0]
+            if not item_id:
+                self.send_json_response(400, {"error": "Missing id parameter"})
+                return
+
+            if not (self.supabase_url and self.supabase_key):
+                self.send_json_response(200, {"status": "ok", "demo": True})
+                return
+
+            rest_url = f"{self.supabase_url}/rest/v1/{table}?id=eq.{item_id}"
+            headers = {
+                "apikey": self.supabase_key,
+                "Authorization": f"Bearer {self.supabase_key}"
+            }
+            req = urllib.request.Request(rest_url, headers=headers, method="DELETE")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    KnowledgeGraphProxyHandler.cached_graph = None
+                    self.send_json_response(200, {"status": "ok"})
+            except Exception as e:
+                self.send_json_response(500, {"error": str(e)})
+            return
+
+        self.send_json_response(404, {"error": "Not found"})
 
     def log_message(self, format, *args):
         # Quiet standard HTTP logs
@@ -256,13 +340,28 @@ def main():
 
         if args.test:
             stats = graph_data.get("stats", {})
+            mem_count = stats.get('memory_count', 0)
+            unlinked_cnt = stats.get('unlinked_memory_count')
+            if unlinked_cnt is None:
+                mem_ents = graph_data.get('memory_entities', [])
+                rels = graph_data.get('relations', [])
+                mems = graph_data.get('memories', [])
+                linked_mems = set(me.get('memory_id') for me in mem_ents if me.get('memory_id'))
+                for r in rels:
+                    if r.get('memory_id'):
+                        linked_mems.add(r.get('memory_id'))
+                unlinked_cnt = len([m for m in mems if m.get('id') not in linked_mems])
+            grounded_cnt = mem_count - unlinked_cnt
+
             print("✅ Successfully connected!")
             print(f"📊 Graph Statistics:")
             print(f"   • Total Entities:        {stats.get('entity_count', 0)}")
             print(f"   • Total Relations:       {stats.get('relation_count', 0)}")
             print(f"   • Active Relations:      {stats.get('active_relations', 0)}")
             print(f"   • Superseded Relations:  {stats.get('superseded_relations', 0)}")
-            print(f"   • Grounded Memories:     {stats.get('memory_count', 0)}")
+            print(f"   • Total Memories:        {mem_count}")
+            print(f"   • Grounded in KG:        {grounded_cnt}")
+            print(f"   • Unlinked (Gray Nodes): {unlinked_cnt}")
             print(f"   • Source Endpoint:       {graph_data.get('source_endpoint')}")
             sys.exit(0)
 

@@ -1661,12 +1661,20 @@ async function executeTool(name: string, args: any, supabase: SupabaseClient): P
         const memories = memoriesRes.data || [];
         const memoryEntities = memoryEntitiesRes.data || [];
 
+        const linkedMemIds = new Set([
+          ...memoryEntities.map((me: any) => me.memory_id),
+          ...relations.map((r: any) => r.memory_id).filter(Boolean),
+        ]);
+        const unlinkedMemoriesCount = memories.filter((m: any) => !linkedMemIds.has(m.id)).length;
+
         const stats = {
           entity_count: entities.length,
           relation_count: relations.length,
           active_relations: relations.filter((r: any) => !r.valid_to).length,
           superseded_relations: relations.filter((r: any) => !!r.valid_to).length,
           memory_count: memories.length,
+          grounded_memory_count: memories.length - unlinkedMemoriesCount,
+          unlinked_memory_count: unlinkedMemoriesCount,
         };
 
         return {
@@ -1821,12 +1829,20 @@ Deno.serve(async (req: Request) => {
       const memories = memoriesRes.data || [];
       const memoryEntities = memoryEntitiesRes.data || [];
 
+      const linkedMemIds = new Set([
+        ...memoryEntities.map((me: any) => me.memory_id),
+        ...relations.map((r: any) => r.memory_id).filter(Boolean),
+      ]);
+      const unlinkedMemoriesCount = memories.filter((m: any) => !linkedMemIds.has(m.id)).length;
+
       const stats = {
         entity_count: entities.length,
         relation_count: relations.length,
         active_relations: relations.filter((r: any) => !r.valid_to).length,
         superseded_relations: relations.filter((r: any) => !!r.valid_to).length,
         memory_count: memories.length,
+        grounded_memory_count: memories.length - unlinkedMemoriesCount,
+        unlinked_memory_count: unlinkedMemoriesCount,
       };
 
       return new Response(

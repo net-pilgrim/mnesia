@@ -162,7 +162,7 @@
     }
   </style>
 </head>
-<body class="text-slate-100 h-screen w-screen flex flex-col overflow-hidden antialiased select-none">
+<body class="text-slate-100 h-screen w-screen flex flex-col overflow-hidden antialiased select-none relative">
 
   <!-- ================= TOP NAVIGATION / HEADER ================= -->
   <header class="h-14 border-b border-white/10 bg-dark-900/80 backdrop-blur-md px-4 flex items-center justify-between z-20 shrink-0 shadow-lg">
@@ -247,77 +247,74 @@
   </header>
 
   <!-- ================= MAIN WORKSPACE AREA ================= -->
-  <div class="relative flex-1 flex overflow-hidden">
-    
-    <!-- Floating Filter Controls Bar (Left Top) -->
-    <div class="absolute top-3 left-3 z-10 flex flex-col gap-2 max-w-sm pointer-events-none">
-      <!-- Entity Type Filter Chips -->
-      <div class="pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <i data-lucide="filter" class="w-3 h-3 text-purple-400"></i> Entity Types
-          </span>
-          <button onclick="resetFilters()" class="text-[10px] text-purple-400 hover:underline font-semibold">Reset</button>
-        </div>
-        <div id="typeFilterPills" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1"></div>
+  <!-- Floating Filter Controls Bar (Left Top) -->
+  <div class="absolute top-16 left-3 z-10 flex flex-col gap-2 max-w-sm pointer-events-none">
+    <!-- Entity Type Filter Chips -->
+    <div class="pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+          <i data-lucide="filter" class="w-3 h-3 text-purple-400"></i> Entity Types
+        </span>
+        <button onclick="resetFilters()" class="text-[10px] text-purple-400 hover:underline font-semibold">Reset</button>
       </div>
-
-      <!-- Display Options -->
-      <div class="pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl flex items-center justify-between text-xs">
-        <label class="flex items-center gap-2 cursor-pointer select-none">
-          <input type="checkbox" id="chkShowSuperseded" onchange="toggleSuperseded(this.checked)" class="rounded bg-dark-800 border-slate-700 text-purple-500 focus:ring-0">
-          <span class="text-slate-300 font-medium">Show Superseded Links</span>
-        </label>
-        <span id="supersededCountPill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-950/60 text-red-400 border border-red-900/60">0</span>
-      </div>
-
-      <!-- Hop Focus Mode Pill -->
-      <div id="focusModeBox" class="hidden pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl flex items-center justify-between text-xs">
-        <div class="flex items-center gap-1.5 text-slate-300">
-          <i data-lucide="crosshair" class="w-3.5 h-3.5 text-emerald-400"></i>
-          <span>Neighborhood Focus:</span>
-          <span id="focusEntityName" class="font-bold text-white truncate max-w-[100px]">Node</span>
-        </div>
-        <button onclick="clearFocusMode()" class="text-xs text-red-400 hover:text-red-300 font-medium ml-2">Exit</button>
-      </div>
+      <div id="typeFilterPills" class="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1"></div>
     </div>
 
-    <!-- Graph Canvas Container -->
-    <div id="graphContainer" class="flex-1 w-full h-full"></div>
-
-    <!-- Floating Helper Badge (Bottom Right) -->
-    <div class="absolute bottom-3 right-4 z-10 pointer-events-none bg-dark-900/80 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-[11px] text-slate-400 flex items-center gap-2 shadow-lg">
-      <span>🖱️ Click to inspect</span>
-      <span>•</span>
-      <span>Double click to isolate</span>
-      <span>•</span>
-      <span>Scroll to zoom</span>
+    <!-- Display Options -->
+    <div class="pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl flex items-center justify-between text-xs">
+      <label class="flex items-center gap-2 cursor-pointer select-none">
+        <input type="checkbox" id="chkShowSuperseded" onchange="toggleSuperseded(this.checked)" class="rounded bg-dark-800 border-slate-700 text-purple-500 focus:ring-0">
+        <span class="text-slate-300 font-medium">Show Superseded Links</span>
+      </label>
+      <span id="supersededCountPill" class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-950/60 text-red-400 border border-red-900/60">0</span>
     </div>
 
-    <!-- ================= RIGHT SLIDE-OVER INSPECTOR DRAWER ================= -->
-    <aside id="inspectorDrawer" class="w-96 max-w-full border-l border-white/10 bg-dark-900/90 backdrop-blur-xl flex flex-col z-20 transition-transform duration-300 ease-in-out translate-x-full shadow-2xl">
-      <!-- Drawer Header -->
-      <div class="h-14 border-b border-white/10 px-4 flex items-center justify-between shrink-0">
-        <div class="flex items-center gap-2 overflow-hidden">
-          <i id="inspectorIcon" data-lucide="circle-dot" class="w-4 h-4 text-purple-400 shrink-0"></i>
-          <h2 id="inspectorTitle" class="text-sm font-bold text-white truncate">Inspector</h2>
-        </div>
-        <div class="flex items-center gap-1">
-          <button id="btnToggleDrawerWidth" onclick="toggleDrawerWidth()" title="Toggle Wide View" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition">
-            <i id="iconDrawerWidth" data-lucide="maximize-2" class="w-4 h-4"></i>
-          </button>
-          <button onclick="closeInspector()" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition">
-            <i data-lucide="x" class="w-4 h-4"></i>
-          </button>
-        </div>
+    <!-- Hop Focus Mode Pill -->
+    <div id="focusModeBox" class="hidden pointer-events-auto bg-dark-900/85 backdrop-blur-md border border-white/10 rounded-2xl p-2.5 shadow-2xl flex items-center justify-between text-xs">
+      <div class="flex items-center gap-1.5 text-slate-300">
+        <i data-lucide="crosshair" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span>Neighborhood Focus:</span>
+        <span id="focusEntityName" class="font-bold text-white truncate max-w-[100px]">Node</span>
       </div>
-
-      <!-- Drawer Scrollable Content -->
-      <div id="inspectorContent" class="flex-1 overflow-y-auto p-4 space-y-5 text-xs text-slate-300">
-        <!-- Content will be rendered dynamically -->
-      </div>
-    </aside>
+      <button onclick="clearFocusMode()" class="text-xs text-red-400 hover:text-red-300 font-medium ml-2">Exit</button>
+    </div>
   </div>
+
+  <!-- Graph Canvas Container -->
+  <div id="graphContainer" class="flex-1 w-full h-full"></div>
+
+  <!-- Floating Drag-to-Connect Indicator Pill -->
+  <div id="dropConnectPill" class="hidden fixed z-50 pointer-events-none bg-emerald-600/95 text-white font-semibold text-xs px-3.5 py-1.5 rounded-full shadow-2xl backdrop-blur-md border border-emerald-400 flex items-center gap-1.5 transition-opacity">
+    <i data-lucide="link-2" class="w-3.5 h-3.5 text-emerald-200"></i>
+    <span id="dropConnectPillText">Drop to connect</span>
+  </div>
+
+  <!-- Floating Action Toast Container -->
+  <div id="toastContainer" class="fixed bottom-6 left-1/2 -translate-y-0 -translate-x-1/2 z-50 flex flex-col items-center gap-2 pointer-events-none"></div>
+
+  <!-- ================= RIGHT SLIDE-OVER INSPECTOR DRAWER ================= -->
+  <aside id="inspectorDrawer" class="fixed top-14 right-0 bottom-0 w-96 max-w-full border-l border-white/10 bg-dark-900/90 backdrop-blur-xl flex flex-col z-20 transition-transform duration-300 ease-in-out translate-x-full shadow-2xl">
+    <!-- Drawer Header -->
+    <div class="h-14 border-b border-white/10 px-4 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2 overflow-hidden">
+        <i id="inspectorIcon" data-lucide="circle-dot" class="w-4 h-4 text-purple-400 shrink-0"></i>
+        <h2 id="inspectorTitle" class="text-sm font-bold text-white truncate">Inspector</h2>
+      </div>
+      <div class="flex items-center gap-1">
+        <button id="btnToggleDrawerWidth" onclick="toggleDrawerWidth()" title="Toggle Wide View" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition">
+          <i id="iconDrawerWidth" data-lucide="maximize-2" class="w-4 h-4"></i>
+        </button>
+        <button onclick="closeInspector()" class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Drawer Scrollable Content -->
+    <div id="inspectorContent" class="flex-1 overflow-y-auto p-4 space-y-5 text-xs text-slate-300">
+      <!-- Content will be rendered dynamically -->
+    </div>
+  </aside>
 
   <!-- ================= SETTINGS & SUPABASE CREDENTIALS MODAL ================= -->
   <div id="settingsModal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
@@ -414,6 +411,8 @@
       library: { bg: '#3B82F6', border: '#60A5FA', highlight: '#BFDBFE', badge: 'bg-blue-950/80 text-blue-300 border-blue-800/80' },
       project: { bg: '#6366F1', border: '#818CF8', highlight: '#C7D2FE', badge: 'bg-indigo-950/80 text-indigo-300 border-indigo-800/80' },
       reference_project: { bg: '#64748B', border: '#94A3B8', highlight: '#CBD5E1', badge: 'bg-slate-800 text-slate-300 border-slate-700' },
+      memory: { bg: '#64748B', border: '#94A3B8', highlight: '#CBD5E1', badge: 'bg-slate-800 text-slate-300 border-slate-600' },
+      unlinked_memory: { bg: '#64748B', border: '#94A3B8', highlight: '#CBD5E1', badge: 'bg-slate-800 text-slate-300 border-slate-600' },
       default: { bg: '#475569', border: '#94A3B8', highlight: '#CBD5E1', badge: 'bg-slate-800 text-slate-300 border-slate-700' }
     };
 
@@ -484,6 +483,15 @@
           content: "Tool Architecture: 2D Shape Nesting with Convex Hull Proxy and SVGnest. Accelerates Minkowski sum from O(N*M) to O(N+M) and eliminates concave interlock.",
           tags: ["nesting", "svgnest", "convex-hull"],
           created_at: "2026-11-19T18:31:00Z"
+        },
+        {
+          id: "m4",
+          agent_id: "antigravity",
+          session_id: "fleet_preferences",
+          category: "preference",
+          content: "Always use internal interactive Knowledge Graph viewer over static charts when exploring entity topologies and memories.",
+          tags: ["preferences", "viewer", "ui"],
+          created_at: "2026-11-19T21:00:00Z"
         }
       ],
       memory_entities: [
@@ -635,25 +643,425 @@
       network.on('doubleClick', onGraphDoubleClick);
       network.on('hoverNode', () => { container.style.cursor = 'pointer'; });
       network.on('blurNode', () => { container.style.cursor = 'default'; });
+
+      // Drag-to-Connect Interaction: Drag node onto another to create 'connected_to'
+      let draggedNodeId = null;
+      let hoverTargetNodeId = null;
+
+      network.on('dragStart', (params) => {
+        if (params.nodes && params.nodes.length > 0) {
+          draggedNodeId = params.nodes[0];
+          // Freeze layout physics while dragging so nodes don't chase or repel each other
+          network.setOptions({ physics: { enabled: false } });
+        } else {
+          draggedNodeId = null;
+        }
+        hoverTargetNodeId = null;
+      });
+
+      network.on('dragging', (params) => {
+        if (!draggedNodeId) return;
+
+        const pointerCanvas = params.pointer.canvas;
+        const allPositions = network.getPositions();
+        let closestId = null;
+        let minDist = Infinity;
+
+        for (const [id, pos] of Object.entries(allPositions)) {
+          if (id === draggedNodeId) continue;
+          const d = Math.hypot(pos.x - pointerCanvas.x, pos.y - pointerCanvas.y);
+          if (d < minDist) {
+            minDist = d;
+            closestId = id;
+          }
+        }
+
+        const pill = document.getElementById('dropConnectPill');
+        const pillText = document.getElementById('dropConnectPillText');
+        if (closestId && minDist <= 55) {
+          hoverTargetNodeId = closestId;
+          const targetName = getNodeDisplayName(closestId);
+          pillText.innerHTML = `Drop on <b>${escapeHtml(targetName)}</b> to create <code class="font-mono bg-emerald-950/80 px-1 py-0.5 rounded text-emerald-200">connected_to</code>`;
+          pill.style.left = `${params.pointer.DOM.x + 18}px`;
+          pill.style.top = `${params.pointer.DOM.y - 14}px`;
+          pill.classList.remove('hidden');
+          container.style.cursor = 'copy';
+        } else {
+          hoverTargetNodeId = null;
+          pill.classList.add('hidden');
+          container.style.cursor = 'pointer';
+        }
+      });
+
+      network.on('dragEnd', (params) => {
+        const pill = document.getElementById('dropConnectPill');
+        pill.classList.add('hidden');
+        container.style.cursor = 'default';
+
+        const srcId = draggedNodeId;
+        let dstId = hoverTargetNodeId;
+
+        // Fallback distance check at drop position
+        if (srcId && !dstId && params.pointer && params.pointer.canvas) {
+          const pointerCanvas = params.pointer.canvas;
+          const allPositions = network.getPositions();
+          let closestId = null;
+          let minDist = Infinity;
+          for (const [id, pos] of Object.entries(allPositions)) {
+            if (id === srcId) continue;
+            const d = Math.hypot(pos.x - pointerCanvas.x, pos.y - pointerCanvas.y);
+            if (d < minDist) {
+              minDist = d;
+              closestId = id;
+            }
+          }
+          if (closestId && minDist <= 55) {
+            dstId = closestId;
+          }
+        }
+
+        draggedNodeId = null;
+        hoverTargetNodeId = null;
+
+        if (srcId && dstId && srcId !== dstId) {
+          handleDropConnect(srcId, dstId);
+        }
+
+        // Restore physics if user had physics active
+        if (isPhysicsActive) {
+          network.setOptions({ physics: { enabled: true } });
+        }
+      });
+    }
+
+    // --- UNLINKED MEMORY EXTRACTION ---
+    function getMemoryLabel(m) {
+      if (m.metadata && (m.metadata.title || m.metadata.name)) {
+        return m.metadata.title || m.metadata.name;
+      }
+      const firstLine = (m.content || '').split('\n').find(l => l.trim().length > 0) || '';
+      const cleaned = firstLine.replace(/^[#*\-\d.\s]+/, '').trim();
+      if (cleaned.length <= 28) return cleaned || `Memory (${m.category || 'general'})`;
+      return cleaned.slice(0, 26) + '…';
+    }
+
+    function getUnlinkedMemoryEntities() {
+      const linkedMemIds = new Set();
+      const existingEntityIds = new Set(rawEntities.map(e => e.id));
+      rawMemoryEntities.forEach(me => {
+        if (me.memory_id && existingEntityIds.has(me.entity_id)) linkedMemIds.add(me.memory_id);
+      });
+      rawRelations.forEach(r => {
+        if (r.memory_id) linkedMemIds.add(r.memory_id);
+      });
+
+      return rawMemories.filter(m => !linkedMemIds.has(m.id)).map(m => ({
+        id: m.id,
+        name: getMemoryLabel(m),
+        type: 'memory',
+        aliases: m.tags || [],
+        metadata: {
+          ...m.metadata,
+          memory_id: m.id,
+          category: m.category,
+          agent_id: m.agent_id,
+          session_id: m.session_id,
+          created_at: m.created_at,
+          full_content: m.content,
+          is_unlinked_memory: true
+        },
+        isMemoryNode: true,
+        rawMemory: m
+      }));
+    }
+
+    // --- DRAG-TO-CONNECT RELATION CREATION ---
+    function getNodeDisplayName(nodeId) {
+      const ent = rawEntities.find(e => e.id === nodeId);
+      if (ent) return ent.name;
+      const unlinked = getUnlinkedMemoryEntities();
+      const mem = unlinked.find(e => e.id === nodeId);
+      if (mem) return mem.name;
+      return nodeId;
+    }
+
+    async function handleDropConnect(srcId, dstId) {
+      // 1. Prevent connecting identical nodes
+      if (srcId === dstId) return;
+
+      // 2. Check if relation already exists with predicate connected_to
+      const existing = rawRelations.find(r => 
+        (!r.valid_to) && 
+        ((r.src === srcId && r.dst === dstId) || (r.src === dstId && r.dst === srcId)) && 
+        r.predicate === 'connected_to'
+      );
+      if (existing) {
+        showToast('Nodes are already linked with "connected_to"', 'info');
+        return;
+      }
+
+      const srcName = getNodeDisplayName(srcId);
+      const dstName = getNodeDisplayName(dstId);
+
+      // 3. Handle promote if either node is an unlinked memory node
+      const unlinked = getUnlinkedMemoryEntities();
+      const srcMem = unlinked.find(e => e.id === srcId);
+      const dstMem = unlinked.find(e => e.id === dstId);
+
+      if (srcMem && !rawEntities.find(e => e.id === srcId)) {
+        await promoteMemoryToEntity(srcMem);
+      }
+      if (dstMem && !rawEntities.find(e => e.id === dstId)) {
+        await promoteMemoryToEntity(dstMem);
+      }
+
+      // 4. Create new relation
+      const relId = 'rel_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+      const newRel = {
+        id: relId,
+        src: srcId,
+        dst: dstId,
+        predicate: 'connected_to',
+        valid_from: new Date().toISOString(),
+        valid_to: null,
+        metadata: {
+          created_via: 'drag_and_drop',
+          created_at: new Date().toISOString()
+        }
+      };
+
+      rawRelations.push(newRel);
+      renderGraph();
+
+      showToast(`Connected <b>${escapeHtml(srcName)}</b> ➔ <code class="font-mono text-sky-400">connected_to</code> ➔ <b>${escapeHtml(dstName)}</b>`, 'success', {
+        label: 'Undo',
+        onClick: () => undoCreateRelation(newRel)
+      });
+
+      // 5. Asynchronously persist to backend (proxy or PostgREST direct)
+      persistRelationToBackend(newRel);
+    }
+
+    async function promoteMemoryToEntity(memNode) {
+      const rawMem = memNode.rawMemory || rawMemories.find(m => m.id === memNode.id);
+      const newEntity = {
+        id: memNode.id,
+        name: memNode.name,
+        type: (rawMem && rawMem.category) || 'concept',
+        aliases: (rawMem && rawMem.tags) || [],
+        metadata: {
+          ...(rawMem ? rawMem.metadata : {}),
+          grounded_memory_id: memNode.id,
+          promoted_via: 'drag_and_drop'
+        }
+      };
+
+      rawEntities.push(newEntity);
+      rawMemoryEntities.push({
+        memory_id: memNode.id,
+        entity_id: memNode.id
+      });
+
+      try {
+        const entityPayload = {
+          id: newEntity.id,
+          name: newEntity.name,
+          type: newEntity.type,
+          aliases: newEntity.aliases,
+          metadata: newEntity.metadata
+        };
+        const memEntPayload = {
+          memory_id: memNode.id,
+          entity_id: memNode.id
+        };
+
+        const res = await fetch('/api/entities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(entityPayload)
+        });
+
+        if (res.ok) {
+          await fetch('/api/memory_entities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(memEntPayload)
+          });
+        } else {
+          const url = document.getElementById('cfgSupabaseUrl').value.trim();
+          const key = document.getElementById('cfgSupabaseKey').value.trim();
+          if (url && key) {
+            const cleanUrl = url.replace(/\/+$/, '');
+            const headers = {
+              'apikey': key,
+              'Authorization': `Bearer ${key}`,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=representation'
+            };
+            await fetch(`${cleanUrl}/rest/v1/entities`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(entityPayload)
+            });
+            await fetch(`${cleanUrl}/rest/v1/memory_entities`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(memEntPayload)
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to persist promoted entity:', e);
+      }
+    }
+
+    async function persistRelationToBackend(relObj) {
+      try {
+        const payload = {
+          src: relObj.src,
+          dst: relObj.dst,
+          predicate: relObj.predicate,
+          valid_from: relObj.valid_from,
+          metadata: relObj.metadata
+        };
+
+        const proxyRes = await fetch('/api/relations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (proxyRes.ok) {
+          const resData = await proxyRes.json();
+          if (resData.data && resData.data.id) {
+            relObj.id = resData.data.id;
+          }
+          return;
+        }
+
+        const url = document.getElementById('cfgSupabaseUrl').value.trim();
+        const key = document.getElementById('cfgSupabaseKey').value.trim();
+        if (url && key) {
+          const cleanUrl = url.replace(/\/+$/, '');
+          const headers = {
+            'apikey': key,
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+          };
+          const sbRes = await fetch(`${cleanUrl}/rest/v1/relations`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(payload)
+          });
+          if (sbRes.ok) {
+            const data = await sbRes.json();
+            if (data && data[0] && data[0].id) {
+              relObj.id = data[0].id;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to persist relation:', err);
+      }
+    }
+
+    async function undoCreateRelation(relObj) {
+      const idx = rawRelations.findIndex(r => r.id === relObj.id);
+      if (idx !== -1) {
+        rawRelations.splice(idx, 1);
+        renderGraph();
+      }
+
+      showToast('Undid "connected_to" relation', 'info');
+
+      try {
+        const proxyRes = await fetch(`/api/relations?id=${relObj.id}`, { method: 'DELETE' });
+        if (!proxyRes.ok) {
+          const url = document.getElementById('cfgSupabaseUrl').value.trim();
+          const key = document.getElementById('cfgSupabaseKey').value.trim();
+          if (url && key) {
+            const cleanUrl = url.replace(/\/+$/, '');
+            await fetch(`${cleanUrl}/rest/v1/relations?id=eq.${relObj.id}`, {
+              method: 'DELETE',
+              headers: {
+                'apikey': key,
+                'Authorization': `Bearer ${key}`
+              }
+            });
+          }
+        }
+      } catch (e) {
+        console.warn('Error deleting relation during undo:', e);
+      }
+    }
+
+    function showToast(msg, type = 'info', action = null) {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+
+      const toast = document.createElement('div');
+      const isSuccess = type === 'success';
+      toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl border text-xs text-white transition-all transform duration-300 translate-y-4 opacity-0 ${
+        isSuccess ? 'bg-dark-900/95 border-emerald-500/40 shadow-emerald-950/50' : 'bg-dark-900/95 border-sky-500/40 shadow-sky-950/50'
+      }`;
+
+      let actionHtml = '';
+      if (action) {
+        actionHtml = `<button id="toastActionBtn" class="ml-2 font-bold px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-emerald-300 hover:text-white transition">${escapeHtml(action.label || 'Action')}</button>`;
+      }
+
+      toast.innerHTML = `
+        <div class="flex items-center gap-2">
+          <i data-lucide="${isSuccess ? 'check-circle-2' : 'info'}" class="w-4 h-4 ${isSuccess ? 'text-emerald-400' : 'text-sky-400'} shrink-0"></i>
+          <span class="leading-snug">${msg}</span>
+        </div>
+        ${actionHtml}
+      `;
+
+      container.appendChild(toast);
+      lucide.createIcons();
+
+      if (action) {
+        const btn = toast.querySelector('#toastActionBtn');
+        if (btn) {
+          btn.onclick = () => {
+            action.onClick();
+            toast.remove();
+          };
+        }
+      }
+
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-4', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('translate-y-4', 'opacity-0');
+        setTimeout(() => toast.remove(), 300);
+      }, 5500);
     }
 
     // --- DATA RENDERING & FILTERING ---
     function renderGraph() {
       if (!network) return;
 
+      const unlinkedEntities = getUnlinkedMemoryEntities();
+      const allGraphNodes = [...rawEntities, ...unlinkedEntities];
+
       // 1. Determine active entity set based on Hop Focus Mode
       let allowedEntityIds = null;
       if (focusCenterEntityId) {
         allowedEntityIds = computeHopNeighborhood(focusCenterEntityId, focusHopDepth || 1);
         document.getElementById('focusModeBox').classList.remove('hidden');
-        const center = rawEntities.find(e => e.id === focusCenterEntityId);
+        const center = allGraphNodes.find(e => e.id === focusCenterEntityId);
         document.getElementById('focusEntityName').textContent = center ? center.name : focusCenterEntityId;
       } else {
         document.getElementById('focusModeBox').classList.add('hidden');
       }
 
       // 2. Filter Entities by active Entity Type filters and Hop Neighborhood
-      const filteredEntities = rawEntities.filter(ent => {
+      const filteredEntities = allGraphNodes.filter(ent => {
         if (allowedEntityIds && !allowedEntityIds.has(ent.id)) return false;
         if (activeTypeFilters.size > 0 && !activeTypeFilters.has(ent.type?.toLowerCase())) return false;
         return true;
@@ -687,9 +1095,12 @@
       const nodeItems = filteredEntities.map(ent => {
         const style = getTypeStyle(ent.type);
         const deg = degreeMap.get(ent.id) || 0;
-        const size = Math.min(30, Math.max(16, 16 + deg * 1.6));
-        const isProminent = deg >= 4;
+        const size = ent.isMemoryNode ? 16 : Math.min(30, Math.max(16, 16 + deg * 1.6));
+        const isProminent = !ent.isMemoryNode && deg >= 4;
         const aliases = (ent.aliases && ent.aliases.length > 0) ? `\nAliases: ${ent.aliases.join(', ')}` : '';
+        const titleText = ent.isMemoryNode
+          ? `[UNLINKED MEMORY: ${(ent.metadata.category || 'general').toUpperCase()}]\nAuthor: ${ent.metadata.agent_id || 'system'}\nCreated: ${formatDate(ent.metadata.created_at)}\nTags: ${(ent.aliases || []).join(', ') || 'none'}\n\n${(ent.metadata.full_content || '').slice(0, 180)}...`
+          : `[${ent.type?.toUpperCase() || 'CONCEPT'}] ${ent.name}${aliases}\nConnections: ${deg}`;
 
         return {
           id: ent.id,
@@ -697,13 +1108,13 @@
           shape: 'dot',
           size: size,
           font: {
-            size: isProminent ? 14 : 12,
+            size: isProminent ? 14 : (ent.isMemoryNode ? 11 : 12),
             face: 'Plus Jakarta Sans, sans-serif',
             strokeWidth: 3,
             strokeColor: '#090d16',
-            color: '#ffffff'
+            color: ent.isMemoryNode ? '#CBD5E1' : '#ffffff'
           },
-          title: `[${ent.type?.toUpperCase() || 'CONCEPT'}] ${ent.name}${aliases}\nConnections: ${deg}`,
+          title: titleText,
           color: {
             background: style.bg,
             border: style.border,
@@ -754,7 +1165,12 @@
       // Update Header Stats
       document.getElementById('statEntities').textContent = rawEntities.length;
       document.getElementById('statRelations').textContent = rawRelations.filter(r => !r.valid_to).length;
-      document.getElementById('statMemories').textContent = rawMemories.length;
+      const memStatElem = document.getElementById('statMemories');
+      if (unlinkedEntities.length > 0) {
+        memStatElem.innerHTML = `${rawMemories.length} <span class="text-slate-400 text-[10px] font-normal">(${unlinkedEntities.length} unlinked)</span>`;
+      } else {
+        memStatElem.textContent = rawMemories.length;
+      }
 
       renderFilterPills();
     }
@@ -788,7 +1204,8 @@
       container.innerHTML = '';
 
       const counts = {};
-      rawEntities.forEach(e => {
+      const unlinkedEntities = getUnlinkedMemoryEntities();
+      [...rawEntities, ...unlinkedEntities].forEach(e => {
         const t = (e.type || 'concept').toLowerCase();
         counts[t] = (counts[t] || 0) + 1;
       });
@@ -869,7 +1286,8 @@
     // --- INSPECTOR DRAWER ---
     function inspectEntity(entityId) {
       selectedEntityId = entityId;
-      const entity = rawEntities.find(e => e.id === entityId);
+      const unlinkedEntities = getUnlinkedMemoryEntities();
+      const entity = [...rawEntities, ...unlinkedEntities].find(e => e.id === entityId);
       if (!entity) return;
 
       const style = getTypeStyle(entity.type);
@@ -879,6 +1297,13 @@
 
       title.textContent = entity.name;
       drawer.classList.remove('translate-x-full');
+
+      // Check if this is an unlinked memory node
+      if (entity.isMemoryNode && entity.rawMemory) {
+        renderUnlinkedMemoryInspector(entity, content, style);
+        lucide.createIcons();
+        return;
+      }
 
       // Relations
       const outRels = rawRelations.filter(r => r.src === entityId);
@@ -1039,6 +1464,67 @@
       lucide.createIcons();
     }
 
+    function renderUnlinkedMemoryInspector(entity, content, style) {
+      const m = entity.rawMemory;
+      content.innerHTML = `
+        <!-- Unlinked Memory Status Card -->
+        <div class="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/80 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Node Type</span>
+            <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold ${style.badge}">
+              Gray Node • Unlinked Memory
+            </span>
+          </div>
+          <div class="p-2.5 rounded-xl bg-amber-950/30 border border-amber-800/40 text-amber-300 text-xs flex items-start gap-2">
+            <i data-lucide="alert-circle" class="w-4 h-4 text-amber-400 shrink-0 mt-0.5"></i>
+            <div>
+              <div class="font-semibold text-[11px]">Memory Not Included in Graph</div>
+              <div class="text-[10px] text-amber-400/80 mt-0.5">This memory is stored in the database but not yet grounded to any Knowledge Graph entities or relations.</div>
+            </div>
+          </div>
+          <div class="pt-2 border-t border-slate-700/60 flex justify-between text-[11px] text-slate-300">
+            <div>Category: <span class="text-white font-mono font-bold capitalize">${escapeHtml(m.category || 'general')}</span></div>
+            <div>Author: <span class="text-emerald-400 font-mono font-bold">${escapeHtml(m.agent_id || 'system')}</span></div>
+          </div>
+          <div class="flex justify-between text-[11px] text-slate-300">
+            <div>Created: <span class="text-slate-400 font-mono">${formatDate(m.created_at)}</span></div>
+            <div>Session: <span class="text-slate-400 font-mono truncate max-w-[120px]">${escapeHtml(m.session_id || 'n/a')}</span></div>
+          </div>
+          ${m.tags && m.tags.length > 0 ? `
+            <div class="pt-2 border-t border-slate-700/60 flex flex-wrap gap-1">
+              ${m.tags.map(t => `<span class="px-2 py-0.5 rounded-lg bg-white/5 text-slate-300 border border-white/10 font-mono text-[10px]">#${escapeHtml(t)}</span>`).join('')}
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Full Memory Content -->
+        <div class="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-2 shadow-sm">
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+            <span>Memory Content</span>
+            <span class="text-slate-500 font-mono text-[9px]">${(m.content || '').length} chars</span>
+          </span>
+          <div class="prose-dark">
+            ${renderMarkdown(m.content)}
+          </div>
+        </div>
+
+        ${m.metadata && Object.keys(m.metadata).length > 0 ? `
+          <div class="space-y-1">
+            <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Metadata</span>
+            <pre class="p-3 rounded-xl bg-black/40 border border-white/10 font-mono text-[11px] text-slate-300 overflow-x-auto">${escapeHtml(JSON.stringify(m.metadata, null, 2))}</pre>
+          </div>
+        ` : ''}
+
+        <div class="p-3 rounded-xl bg-purple-950/20 border border-purple-500/20 text-purple-300 text-xs flex items-start gap-2">
+          <i data-lucide="sparkles" class="w-4 h-4 text-purple-400 shrink-0 mt-0.5"></i>
+          <div>
+            <div class="font-semibold text-[11px]">How to Ground into KG</div>
+            <div class="text-[10px] text-purple-300/80 mt-0.5">Agents can ground this memory into entities by calling <code class="bg-black/30 px-1 py-0.5 rounded text-purple-200 font-mono">link_entities</code> or passing <code class="bg-black/30 px-1 py-0.5 rounded text-purple-200 font-mono">entities</code> & <code class="bg-black/30 px-1 py-0.5 rounded text-purple-200 font-mono">relations</code> in <code class="bg-black/30 px-1 py-0.5 rounded text-purple-200 font-mono">store_memory</code>.</div>
+          </div>
+        </div>
+      `;
+    }
+
     function inspectRelation(edgeId) {
       const rel = rawRelations.find(r => r.id === edgeId);
       if (!rel) return;
@@ -1135,10 +1621,14 @@
       }
       btnClear.classList.remove('hidden');
 
-      const matches = rawEntities.filter(e => {
+      const unlinkedEntities = getUnlinkedMemoryEntities();
+      const allSearchNodes = [...rawEntities, ...unlinkedEntities];
+
+      const matches = allSearchNodes.filter(e => {
         if (e.name.toLowerCase().includes(q)) return true;
         if (e.type && e.type.toLowerCase().includes(q)) return true;
         if (e.aliases && e.aliases.some(a => a.toLowerCase().includes(q))) return true;
+        if (e.isMemoryNode && e.metadata?.full_content?.toLowerCase().includes(q)) return true;
         return false;
       }).slice(0, 10);
 
